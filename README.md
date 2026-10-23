@@ -53,6 +53,8 @@ tests/codex-review.test.sh
 
 Runs every case in a detached tmux session against a fake `codex` binary (needs `cc`). It doesn't touch your other sessions.
 
-## Third-party
+## License
+
+MIT: see `LICENSE`.
 
 `bin/tmux-bridge` and `skills/smux/SKILL.md` are from [ShawnPana/smux](https://github.com/ShawnPana/smux) at commit `84734364206403a2e51b601d3ad8c85464fcdd17`, MIT licensed: see `licenses/smux-LICENSE`.
