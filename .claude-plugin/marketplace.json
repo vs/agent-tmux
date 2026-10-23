@@ -1,0 +1,6 @@
+{
+  "name": "agent-tmux",
+  "description": "Marketplace for agent-tmux",
+  "owner": {"name": "Semyon Vadishev"},
+  "plugins": [{"name": "agent-tmux", "source": "./"}]
+}

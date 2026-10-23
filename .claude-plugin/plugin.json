@@ -1,0 +1,9 @@
+{
+  "name": "agent-tmux",
+  "version": "0.1.0",
+  "description": "Let Claude Code and Codex agents in tmux panes talk to each other, and ask Codex for a review with /agent-tmux:codex-review",
+  "author": {"name": "Semyon Vadishev"},
+  "repository": "https://github.com/vs/agent-tmux",
+  "license": "MIT",
+  "keywords": ["tmux", "codex", "review", "multi-agent"]
+}

@@ -7,11 +7,21 @@ talk to each other, and ask Codex for a review with one command.
 |---|---|
 | `bin/tmux-bridge` | CLI to read, type into, and message other panes (vendored from [smux](https://github.com/ShawnPana/smux)). |
 | `skills/smux` | Skill for Claude Code and Codex that teaches the `tmux-bridge` protocol (vendored from smux). |
-| `skills/codex-review` | Claude Code skill: `/codex-review [extra focus]` asks the Codex session in the same window to review your changes. |
+| `skills/codex-review` | Claude Code skill: `/agent-tmux:codex-review [extra focus]` asks the Codex session in the same window to review your changes. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders. |
-| `install.sh` | Links everything into place and applies the settings below. Safe to re-run. |
+| `.claude-plugin/` | Makes the repo a Claude Code plugin and its own marketplace. |
+| `install.sh` | Sets up what the plugin can't (Codex, tmux, permissions). Safe to re-run. |
 
 ## Install
+
+Claude Code, as a plugin (provides both skills, and puts `bin/` on the Bash tool's `PATH`):
+
+```sh
+claude plugin marketplace add vs/agent-tmux
+claude plugin install agent-tmux@agent-tmux
+```
+
+Then, for Codex and tmux:
 
 ```sh
 ./install.sh
@@ -19,21 +29,22 @@ talk to each other, and ask Codex for a review with one command.
 
 It needs `tmux` (3.2+) and `jq`, and:
 
-- links `bin/tmux-bridge` into `~/.local/bin` (must be on `PATH`);
-- links `skills/smux` into `~/.claude/skills` and `~/.codex/skills`, and `skills/codex-review` into `~/.claude/skills`;
+- links `bin/tmux-bridge` into `~/.local/bin` (must be on `PATH`; Codex needs it there);
+- links `skills/smux` into `~/.codex/skills`;
+- removes `~/.claude/skills/{smux,codex-review}` links left by earlier versions, which would duplicate the plugin's skills;
 - adds `source-file <repo>/config/tmux.conf` to `~/.tmux.conf`;
 - allows `Bash(tmux-bridge:*)` in `~/.claude/settings.json`;
 - adds `prefix_rule(pattern=["tmux-bridge"], decision="allow")` to `~/.codex/rules/default.rules`, so Codex runs `tmux-bridge` without asking and outside its sandbox (which can't reach the tmux socket).
 
 Anything real it would replace is moved to `~/.agent-tmux/backups/<timestamp>/` first; settings files it edits get a `*.bak-<timestamp>` copy next to them. Restart Codex afterwards; it loads skills and rules at startup.
 
-## /codex-review
+## /agent-tmux:codex-review
 
 Run in Claude Code, in a tmux window that has exactly one Codex pane:
 
 ```
-/codex-review
-/codex-review focus on error handling
+/agent-tmux:codex-review
+/agent-tmux:codex-review focus on error handling
 ```
 
 1. Finds the Codex pane in the current window (any pane whose process tree runs `codex`). Exits with an error if there is none or more than one.
@@ -42,8 +53,6 @@ Run in Claude Code, in a tmux window that has exactly one Codex pane:
 4. Codex sends the review back into the calling pane as a `[tmux-bridge from:...]` message.
 
 `CODEX_REVIEW_DRY_RUN=1` prints the request instead of sending it.
-
-The skill's `allowed-tools` uses the absolute path `/Users/vs/.claude/skills/codex-review/codex-review.sh`; change it if your home directory differs.
 
 ## Tests
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# install.sh — link this repo's CLI and skills into place and apply the
-# tmux, Claude Code and Codex settings they need. Safe to re-run.
+# install.sh — set up what the Claude Code plugin can't: tmux-bridge and the
+# smux skill for Codex, pane labels in tmux, and permission rules so neither
+# agent asks before running tmux-bridge. Safe to re-run.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -37,12 +38,21 @@ link() {
   info "linked  $dst -> $src"
 }
 
-# --- CLI and skills ---
+# --- CLI and Codex skill ---
+# Claude Code gets both skills and bin/ from the plugin itself.
 
 link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
-link "$REPO/skills/smux" "$HOME/.claude/skills/smux"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
-link "$REPO/skills/codex-review" "$HOME/.claude/skills/codex-review"
+
+# Earlier versions linked the skills into ~/.claude/skills; with the plugin
+# installed those would load a second copy of each skill.
+for skill in smux codex-review; do
+  dst="$HOME/.claude/skills/$skill"
+  if [[ -L "$dst" && "$(readlink "$dst")" == "$REPO/skills/$skill" ]]; then
+    rm "$dst"
+    info "removed $dst (the plugin provides it)"
+  fi
+done
 
 if ! tr ':' '\n' <<<"$PATH" | grep -qx "$HOME/.local/bin"; then
   info "warning: ~/.local/bin is not on PATH; add it so agents can run tmux-bridge"
