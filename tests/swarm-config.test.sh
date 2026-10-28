@@ -27,7 +27,7 @@ expect "missing config = defaults" 0 "root $HOME/workspace"       swarm config
 expect "no args prints usage"   1 "usage: swarm"                  swarm
 expect "unknown dash flag"      1 "usage: swarm"                  swarm --nope
 expect "unknown subcommand"     1 "swarm: error: unknown subcommand frob" swarm frob
-expect "unimplemented hidden"   1 "unknown subcommand _resolve"  swarm _resolve
+expect "unimplemented hidden"   1 "unknown subcommand _home"      swarm _home
 # /bin/sh may be bash in sh mode (macOS), so compare the first pane to a later one.
 t_session shelltest
 t_session shelltest2

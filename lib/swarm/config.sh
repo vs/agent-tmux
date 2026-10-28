@@ -136,3 +136,112 @@ EOT
     return 1
   fi
 }
+
+# --- Argument resolution -----------------------------------------------------
+
+# State for one cfg_resolve run.
+_RES_OUT=""
+_RES_STACK=""
+
+# _res_dir <path> -> absolute path without trailing slash; fails if not a dir.
+_res_dir() {
+  local p
+  p=$(cfg_expand "$1")
+  [[ -d "$p" ]] || return 1
+  (cd "$p" 2>/dev/null && pwd)
+}
+
+# _res_lookup <table> <name> -> the second column of the first matching row.
+_res_lookup() {
+  local k v tab=$'\t'
+  while IFS="$tab" read -r k v; do
+    if [[ "$k" == "$2" ]]; then printf '%s' "$v"; return 0; fi
+  done <<EOT
+$1
+EOT
+  return 1
+}
+
+# _res_add <name> <dir>: append, dropping repeats of a dir, rejecting name clashes.
+_res_add() {
+  local name="$1" dir="$2" n d tab=$'\t'
+  if [[ -n "$_RES_OUT" ]]; then
+    while IFS="$tab" read -r n d; do
+      if [[ "$d" == "$dir" ]]; then return 0; fi
+      if [[ "$n" == "$name" ]]; then
+        swarm_die "name '$name' is used by both $d and $dir; add a project line"
+      fi
+    done <<EOT
+$_RES_OUT
+EOT
+  fi
+  _RES_OUT="${_RES_OUT}${_RES_OUT:+
+}${name}${tab}${dir}"
+}
+
+_res_one() {
+  local arg="$1" members m g saved dir name root roots tried=""
+  if members=$(_res_lookup "$CFG_GROUPS" "$arg"); then
+    case "
+$_RES_STACK
+" in
+      *"
+$arg
+"*)
+        g="${_RES_STACK//$'\n'/ -> }"
+        swarm_die "group cycle: ${g} -> $arg"
+        ;;
+    esac
+    saved="$_RES_STACK"
+    _RES_STACK="${_RES_STACK}${_RES_STACK:+
+}$arg"
+    for m in $members; do _res_one "$m"; done
+    _RES_STACK="$saved"
+    return 0
+  fi
+  if dir=$(_res_lookup "$CFG_PROJECTS" "$arg"); then
+    dir=$(_res_dir "$dir") || swarm_die "project '$arg': directory does not exist: $(_res_lookup "$CFG_PROJECTS" "$arg")"
+    _res_add "$arg" "$dir"
+    return 0
+  fi
+  roots="$CFG_ROOTS"
+  [[ -n "$roots" ]] || roots="$HOME/workspace"
+  # Explicit paths (., .., ./x, ../x, /x, ~/x) are never looked up under a root.
+  case "$arg" in
+    . | .. | ./* | ../* | /* | "~"*) roots="" ;;
+  esac
+  while IFS= read -r root; do
+    [[ -n "$root" ]] || continue
+    tried="${tried}, ${root%/}/$arg"
+    if dir=$(_res_dir "${root%/}/$arg"); then
+      _res_add "$(swarm_sanitize "$(basename "$dir")")" "$dir"
+      return 0
+    fi
+  done <<EOT
+$roots
+EOT
+  tried="${tried}, path"
+  if [[ "$arg" == */* || "$arg" == "~"* || "$arg" == "." ]]; then
+    if dir=$(_res_dir "$arg"); then
+      name=$(swarm_sanitize "$(basename "$dir")")
+      _res_add "$name" "$dir"
+      return 0
+    fi
+  fi
+  swarm_die "cannot resolve '$arg' (tried: group, project${tried})"
+}
+
+# cfg_resolve <arg>... -> `name<TAB>dir` lines; nothing on stdout on failure.
+cfg_resolve() {
+  cfg_load
+  _RES_OUT="" _RES_STACK=""
+  local a
+  for a in "$@"; do _res_one "$a"; done
+  [[ -z "$_RES_OUT" ]] || printf '%s\n' "$_RES_OUT"
+}
+
+cmd__resolve() {
+  local out
+  out=$(cfg_resolve "$@") || exit 1
+  [[ -z "$out" ]] || printf '%s\n' "$out"
+}
