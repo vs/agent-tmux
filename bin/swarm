@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# swarm — orchestrate Claude Code lieutenants in tmux windows.
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# Resolve symlinks (macOS has no readlink -f) to find the repo root.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+  _dir=$(cd "$(dirname "$_src")" && pwd)
+  _src=$(readlink "$_src")
+  [[ "$_src" == /* ]] || _src="$_dir/$_src"
+done
+SWARM_ROOT=$(cd "$(dirname "$_src")/.." && pwd)
+unset _src _dir
+
+for _f in "$SWARM_ROOT"/lib/swarm/*.sh; do
+  # shellcheck disable=SC1090
+  source "$_f"
+done
+unset _f
+
+SWARM_SUBCOMMANDS="open delegate status peek report close watch layout config help _retile-session _resolve _home"
+
+swarm_usage() {
+  local s list=""
+  for s in $SWARM_SUBCOMMANDS; do
+    [[ "$s" == _* ]] || list="${list}${list:+|}$s"
+  done
+  echo "usage: swarm <$list> [args]"
+}
+
+cmd_help() { swarm_usage; }
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    swarm_usage >&2
+    exit 1
+  fi
+  local sub="$1" s fn
+  shift
+  if [[ "$sub" == -* ]]; then
+    swarm_usage >&2
+    exit 1
+  fi
+  for s in $SWARM_SUBCOMMANDS; do
+    if [[ "$s" == "$sub" ]]; then
+      fn="cmd_${sub//-/_}"
+      if declare -F "$fn" >/dev/null; then
+        "$fn" "$@"
+        return
+      fi
+      break
+    fi
+  done
+  swarm_die "unknown subcommand $sub"
+}
+
+main "$@"
