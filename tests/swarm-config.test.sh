@@ -14,6 +14,7 @@ set lt_model sonnet
 bogus line here
 CONF
 expect "config prints roots"    1 "root $HOME/workspace"          swarm config
+expect "trailing comment stripped" 1 $'root /tmp/other\n' swarm config
 expect "config prints project"  1 "project tmux-agent $HOME/workspace/tmux" swarm config
 expect "config prints group"    1 "group work assup code tmux-agent" swarm config
 expect "config setting"         1 "set lt_model sonnet"           swarm config
@@ -27,4 +28,12 @@ expect "no args prints usage"   1 "usage: swarm"                  swarm
 expect "unknown dash flag"      1 "usage: swarm"                  swarm --nope
 expect "unknown subcommand"     1 "swarm: error: unknown subcommand frob" swarm frob
 expect "unimplemented hidden"   1 "unknown subcommand _resolve"  swarm _resolve
+# /bin/sh may be bash in sh mode (macOS), so compare the first pane to a later one.
+t_session shelltest
+t_session shelltest2
+sleep 0.3
+expect_eq "first session pane shell matches /bin/sh" \
+  "$(t_tmux display-message -p -t shelltest2 '#{pane_current_command}')" \
+  "$(t_tmux display-message -p -t shelltest '#{pane_current_command}')"
+expect_eq "default-shell is /bin/sh" "/bin/sh" "$(t_tmux show-options -gv default-shell)"
 t_done

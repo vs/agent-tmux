@@ -57,9 +57,11 @@ t_session() {
   if t_tmux has-session 2>/dev/null; then
     t_tmux new-session -d -s "$name" -x 200 -y 50 -c "$dir"
   else
-    tmux -L "$SWARM_TMUX_SOCKET" -f /dev/null new-session -d -s "$name" -x 200 -y 50 -c "$dir"
+    # One invocation so default-shell is set before the first pane spawns.
+    tmux -L "$SWARM_TMUX_SOCKET" -f /dev/null start-server \; \
+      set-option -g default-shell /bin/sh \; \
+      new-session -d -s "$name" -x 200 -y 50 -c "$dir"
   fi
-  t_tmux set-option -g default-shell /bin/sh
 }
 
 # expect <name> <exit code> <output substring> <cmd...>
