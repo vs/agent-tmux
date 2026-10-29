@@ -129,10 +129,10 @@ expect_eq "stack again" "120" "$(t_tmux display -p -t "$w.0" '#{pane_width}')"
 # --- hooks (config/tmux.conf), end to end on the private server --------------
 t_tmux -f "$REPO/config/tmux.conf" source-file "$REPO/config/tmux.conf"
 hooks=$(t_tmux show-hooks -g)
-# show-hooks prints the stored command re-quoted, so the inner quotes show as \".
+# The name goes in shell-escaped by tmux (#{q:}) and unquoted.
 for hk in after-split-window after-kill-pane; do
-  expect_eq "$hk hook keeps literal format" "1" \
-    "$(printf '%s\n' "$hooks" | grep "^$hk\\[90\\]" | grep -c '_retile-session \\"#{session_name}\\"')"
+  expect_eq "$hk hook passes #{q:session_name} unquoted" "1" \
+    "$(printf '%s\n' "$hooks" | grep "^$hk\\[90\\]" | grep -c '_retile-session #{q:session_name} ||')"
 done
 mkdir -p "$HOME/.local/bin"
 ln -s "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
@@ -150,6 +150,17 @@ if wait_for lab "$h.2" hooked; then t_pass "hook labels helper"; else t_fail "ho
 t_tmux resize-pane -t "$h.0" -x 30
 t_tmux kill-pane -t "$h.2"
 if wait_for pane_w "$h.0" 120; then t_pass "hook re-tiles after kill-pane"; else t_fail "hook re-tiles after kill-pane" "$(geom "$h")"; fi
+
+# A session name with ", $ and spaces still re-tiles, and runs nothing.
+printf '#!/bin/sh\ntouch "%s/pwned"\n' "$WORK" > "$WORK/bin/swarm-pwn"; chmod +x "$WORK/bin/swarm-pwn"
+odd=$(t_tmux new-session -d -P -F '#{session_id}' -s 'q"1" $(swarm-pwn) `swarm-pwn` z' -x 200 -y 50)
+ow=$(t_tmux list-windows -t "$odd" -F '#{window_id}')
+t_tmux resize-window -t "$ow" -x 241 -y 61
+t_tmux set-option -w -t "$ow" @swarm-role lieutenant
+t_tmux set-option -w -t "$ow" @swarm-layout stack
+t_tmux split-window -h -d -l 200 -t "$ow"
+if wait_for pane_w "$ow.0" 120; then t_pass "hook re-tiles a session with an odd name"; else t_fail "hook re-tiles a session with an odd name" "$(geom "$ow")"; fi
+expect_eq "nothing run from the session name" "no" "$([ -e "$WORK/pwned" ] && echo yes || echo no)"
 
 t_tmux split-window -d -t "$u"
 after=$(t_tmux display -p -t "$u" '#{window_layout}')
