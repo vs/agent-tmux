@@ -5,13 +5,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/swarm-lib.sh"
 t_setup
 
 t_session home
-# swarm prepends /opt/homebrew/bin to PATH and tmux hands the client's PATH to new
-# panes, which would find the real claude first: pin the fake's PATH in pane shells.
-t_tmux set-option -g default-command "exec env PATH='$PATH' /bin/sh"
 (sleep 600 | t_tmux -C attach -t home) >/dev/null 2>&1 &
 ctl=$!; disown "$ctl"
 sleep 0.5
-export FAKE_ITERM_CODE=3 SWARM_CLAUDE="$WORK/bin/claude"
+export FAKE_ITERM_CODE=3
 
 mkdir -p "$HOME/workspace"/{assup,code,"sp ace"}
 printf 'group work assup code\n' > "$SWARM_CONFIG"
@@ -26,7 +23,8 @@ want=$(cd -P "$HOME/workspace/assup" && pwd)
 expect_eq "shell cwd"  "$want" "$(t_tmux display -p -t "$a.0" '#{pane_current_path}')"
 expect_eq "tags"       "assup main $HOME/workspace/assup stack" "$(t_tmux display -p -t "$a" '#{@swarm-project} #{@swarm-role} #{@swarm-dir} #{@swarm-layout}')"
 expect_eq "selected first" "$a" "$(t_tmux display -p -t home '#{window_id}')"
-until grep -q 'assup-main' "$FAKE_CLAUDE_LOG" 2>/dev/null && [ "$(wc -l < "$FAKE_CLAUDE_LOG")" -ge 2 ]; do sleep 0.2; done
+log2() { [ "$(wc -l < "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
+expect "both orchestrators started" 0 "" t_wait 15 log2
 expect "orchestrator args" 0 "" grep -aqF -e $'--name\x1fassup-main' "$FAKE_CLAUDE_LOG"
 expect_eq "first owns telegram"   "1" "$(t_tmux show -wv -t "$a" @swarm-telegram)"
 expect_eq "second has no telegram tag" "" "$(t_tmux show -wv -t "$c" @swarm-telegram 2>/dev/null || true)"
@@ -50,9 +48,10 @@ expect_eq "busy pane untouched" "$before" "$(cat "$FAKE_CLAUDE_LOG")"
 # Free the pane, then resume.
 apid=$(t_tmux list-panes -t "$a" -F '#{pane_pid}' | sed -n 2p)
 t_tmux send-keys -t "$a.1" C-c
-for _ in $(seq 50); do pgrep -P "$apid" >/dev/null 2>&1 || break; sleep 0.2; done
+nochild() { ! pgrep -P "$apid" >/dev/null 2>&1; }
+expect "agent pane idle" 0 "" t_wait 10 nochild
 : > "$FAKE_CLAUDE_LOG"; swarm assup
-until [ -s "$FAKE_CLAUDE_LOG" ]; do sleep 0.2; done
+expect "claude started" 0 "" t_wait 15 test -s "$FAKE_CLAUDE_LOG"
 expect "dead orchestrator resumed" 0 "" grep -aqF -e $'--resume\x1fs1' "$FAKE_CLAUDE_LOG"
 expect "resume keeps name" 0 "" grep -aqF -e $'--name\x1fassup-main' "$FAKE_CLAUDE_LOG"
 expect_eq "resume: still no duplicate" "$n" "$(t_tmux list-windows -t home | wc -l)"
@@ -72,7 +71,7 @@ echo '[broken' > "$FAKE_AGENTS_JSON"; expect "bad agents json tolerated" 0 "" sw
 printf 'set telegram_project code\n' > "$SWARM_CONFIG"
 mkdir -p "$HOME/workspace/third"; echo '[]' > "$FAKE_AGENTS_JSON"; : > "$FAKE_CLAUDE_LOG"
 swarm third
-until [ -s "$FAKE_CLAUDE_LOG" ]; do sleep 0.2; done
+expect "claude started" 0 "" t_wait 15 test -s "$FAKE_CLAUDE_LOG"
 expect "telegram_project: others off" 0 'enabledPlugins' grep -a third-main "$FAKE_CLAUDE_LOG"
 : > "$FAKE_ITERM_LOG"
 FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
@@ -80,6 +79,27 @@ expect "own-window opens iTerm window" 0 "new-window --session swarm-code" cat "
 expect "own-window session exists" 0 "" t_tmux has-session -t =swarm-code
 expect_eq "own-window main tab" "code-main main" "$(t_tmux list-windows -t =swarm-code -F '#{window_name} #{@swarm-role}')"
 expect_eq "own-window panes" "2" "$(t_tmux list-panes -t =swarm-code | wc -l | tr -d ' ')"
+# Reattach: second open with no client calls new-window again; with a client it doesn't.
+: > "$FAKE_ITERM_LOG"
+FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
+expect "own-window reopen reattaches" 0 "new-window --session swarm-code" cat "$FAKE_ITERM_LOG"
+(sleep 600 | t_tmux -C attach -t swarm-code) >/dev/null 2>&1 &
+ctl2=$!; disown "$ctl2"; sleep 0.5
+: > "$FAKE_ITERM_LOG"
+FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
+expect_eq "own-window with client: no new window" "" "$(cat "$FAKE_ITERM_LOG")"
+pkill -P "$ctl2" 2>/dev/null || true; kill "$ctl2" 2>/dev/null || true
+
+# Launcher fallback (stand-in commands).
+lw() { bash -c 'source "$1"; shift; swarm_write_launcher "$@"' _ "$T_REPO/lib/swarm/agents.sh" "$@"; }
+rm -f "$WORK/fb"
+lw "$WORK/l1.sh" "$WORK" sh -c 'exit 3' --else sh -c "echo fb >> '$WORK/fb'"
+bash "$WORK/l1.sh"
+expect_eq "fast failure runs fallback" "fb" "$(cat "$WORK/fb" 2>/dev/null)"
+rm -f "$WORK/fb"
+lw "$WORK/l2.sh" "$WORK" sh -c 'exit 130' --else sh -c "echo fb >> '$WORK/fb'"
+bash "$WORK/l2.sh"
+expect_eq "interrupt skips fallback" "" "$(cat "$WORK/fb" 2>/dev/null)"
 expect "home never opens a window" 1 "" sh -c "grep -v swarm-code '$FAKE_ITERM_LOG' | grep -q new-window"
 
 pkill -P "$ctl" 2>/dev/null || true

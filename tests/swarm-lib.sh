@@ -64,6 +64,15 @@ t_session() {
   fi
 }
 
+# t_wait <secs> <cmd...>: poll until cmd succeeds; returns 1 on timeout.
+t_wait() {
+  local n=$(( $1 * 5 )); shift
+  while ! "$@" 2>/dev/null; do
+    n=$((n - 1)); [[ $n -gt 0 ]] || return 1
+    sleep 0.2
+  done
+}
+
 # expect <name> <exit code> <output substring> <cmd...>
 expect() {
   local name="$1" want_code="$2" want_out="$3"; shift 3

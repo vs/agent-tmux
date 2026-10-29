@@ -90,6 +90,17 @@ _open_new_tab() {
   swarm_retile_window "$win"
 }
 
+# _open_reattach <session>: for --own-window, open an iTerm window when the
+# session has no attached client.
+_open_reattach() {
+  local attached
+  attached=$(tmx list-clients -t "=$1" -F '#{client_name}' 2>/dev/null || true)
+  if [[ -z "$attached" ]]; then
+    swarm_iterm new-window --session "$1" \
+      || swarm_warn "could not open an iTerm window for $1"
+  fi
+}
+
 cmd_open() {
   local own=0 res name dir session win sid pane panes pid first="" tab=$'\t'
   while [[ $# -gt 0 && "$1" == -* ]]; do
@@ -119,7 +130,7 @@ EOT
 
   while IFS="$tab" read -r name dir; do
     [[ -n "$name" ]] || continue
-    local fresh=0 attached
+    local fresh=0
     if [[ $own == 1 ]]; then
       session="swarm-$name"
       if ! tmx has-session -t "=$session" 2>/dev/null; then
@@ -137,6 +148,7 @@ EOT
       fi
       if swarm_agent_live "${name}-main"; then
         [[ -n "$first" ]] || first="$win"
+        [[ $own == 0 ]] || _open_reattach "$session"
         continue
       fi
       panes=$(tmx list-panes -t "$win" -F '#{pane_id} #{pane_pid}')
@@ -153,6 +165,7 @@ EOT
         _open_launch "$name" "$dir" "$pane" "$sid"
       fi
       [[ -n "$first" ]] || first="$win"
+      [[ $own == 0 ]] || _open_reattach "$session"
       continue
     fi
 
@@ -162,13 +175,7 @@ EOT
     _open_launch "$name" "$dir" "$_OPEN_AGENT" ""
     [[ -n "$first" ]] || first="$_OPEN_WIN"
 
-    if [[ $own == 1 ]]; then
-      attached=$(tmx list-clients -t "=$session" -F '#{client_name}' 2>/dev/null || true)
-      if [[ -z "$attached" ]]; then
-        swarm_iterm new-window --session "$session" \
-          || swarm_warn "could not open an iTerm window for $session"
-      fi
-    fi
+    [[ $own == 0 ]] || _open_reattach "$session"
   done <<EOT
 $res
 EOT

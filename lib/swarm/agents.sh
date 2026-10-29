@@ -1,15 +1,14 @@
 # Orchestrator launch helpers and `claude agents --json` access. Sourced by
 # bin/swarm; bash 3.2 compatible. Task 8 extends this file.
 
-# SWARM_CLAUDE overrides the claude binary for this query (tests: bin bypasses the
-# /opt/homebrew/bin PATH prefix that would find the real one first).
 # swarm_agents_tsv -> name<TAB>status<TAB>waitingFor<TAB>cwd<TAB>sessionId per
-# agent; null becomes empty. Prints nothing (and returns 0) when the command
+# agent; null or empty becomes "-" so that read with a tab IFS (which collapses
+# empty fields) always sees exactly 5 columns. Prints nothing (and returns 0) when the command
 # fails or prints something that isn't a JSON array.
 swarm_agents_tsv() {
   local json
-  json=$("${SWARM_CLAUDE:-claude}" agents --json 2>/dev/null) || return 0
-  printf '%s' "$json" | jq -r '.[] | [.name, .status, .waitingFor, .cwd, .sessionId] | map(. // "") | join("\t")' 2>/dev/null || true
+  json=$(claude agents --json 2>/dev/null) || return 0
+  printf '%s' "$json" | jq -r '.[] | [.name, .status, .waitingFor, .cwd, .sessionId] | map(if . == null or . == "" then "-" else . end) | join("\t")' 2>/dev/null || true
 }
 
 # swarm_agent_live <name> -> 0 if the agent is listed. Safe under set -e.

@@ -2,7 +2,11 @@
 # swarm — orchestrate Claude Code lieutenants in tmux windows.
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for _d in /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$_d:"*) ;; *) PATH="$PATH:$_d" ;; esac
+done
+export PATH
+unset _d
 
 # Resolve symlinks (macOS has no readlink -f) to find the repo root.
 _src="${BASH_SOURCE[0]}"
