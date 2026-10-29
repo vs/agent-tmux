@@ -25,6 +25,9 @@ expect_eq "dot sanitized" "my-proj	$HOME/workspace/my.proj" "$(r my.proj)"
 expect_eq "space in path" "with-space	$HOME/workspace/with space" "$(r "$HOME/workspace/with space")"
 expect_eq "tilde path"    "assup	$HOME/workspace/assup"  "$(r '~/workspace/assup/')"
 expect_eq "dot arg"       "code	$HOME/workspace/code"   "$(cd "$HOME/workspace/code" && r .)"
+expect "empty argument" 1 "cannot resolve ''" swarm _resolve ''
+expect "empty argument: not a cycle" 1 "" sh -c "swarm _resolve '' 2>&1 | grep -q cycle"
+SWARM_CONFIG=/nonexistent expect "empty argument, no config" 1 "cannot resolve ''" swarm _resolve ''
 expect "cycle"     1 "group cycle: loop1 -> loop2 -> loop1" swarm _resolve loop1
 expect "not found prints nothing" 1 "cannot resolve 'nope' (tried: group, project, $HOME/workspace/nope, path)" swarm _resolve assup nope
 expect_eq "not found: no stdout" "" "$(swarm _resolve assup nope 2>/dev/null)"

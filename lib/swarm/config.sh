@@ -13,6 +13,7 @@ CFG_PROJECTS=""
 CFG_GROUPS=""
 CFG_SETTINGS=""
 CFG_ERRORS=""
+CFG_INVALID=""   # name<TAB>error for project/group lines rejected for their name
 
 cfg_default() {
   case "$1" in
@@ -49,8 +50,30 @@ cfg_trim() {
 cfg_err() { CFG_ERRORS="${CFG_ERRORS}${CFG_ERRORS:+
 }line $1: $2"; }
 
+# cfg_bad_name <line> <kind> <name> -> 0 (and records the error) when the
+# name has characters tmux targets or session names can't take.
+cfg_bad_name() {
+  [[ "$3" =~ ^[A-Za-z0-9_-]+$ ]] && return 1
+  local msg="line $1: invalid $2 name '$3' (use letters, digits, - and _)"
+  CFG_ERRORS="${CFG_ERRORS}${CFG_ERRORS:+
+}$msg"
+  CFG_INVALID="${CFG_INVALID}${CFG_INVALID:+
+}$3"$'\t'"$msg"
+  return 0
+}
+
+# cfg_number_ok <key> <value> -> 0 unless <key> is a numeric setting and
+# <value> isn't a number of its kind (integers; retile_delay a decimal).
+cfg_number_ok() {
+  case "$1" in
+    stall_min | idle_min | poll_sec) [[ "$2" =~ ^[0-9]+$ ]] ;;
+    retile_delay) [[ "$2" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] ;;
+    *) return 0 ;;
+  esac
+}
+
 cfg_load() {
-  CFG_ROOTS="" CFG_PROJECTS="" CFG_GROUPS="" CFG_SETTINGS="" CFG_ERRORS=""
+  CFG_ROOTS="" CFG_PROJECTS="" CFG_GROUPS="" CFG_SETTINGS="" CFG_ERRORS="" CFG_INVALID=""
   local file="${SWARM_CONFIG:-$HOME/.agent-tmux/swarm.conf}"
   [[ -f "$file" ]] || return 0
   local n=0 line dir rest name path members key val tab=$'\t'
@@ -72,6 +95,7 @@ cfg_load() {
         path=""
         [[ "$rest" == *[[:space:]]* ]] && path=$(cfg_trim "${rest#"$name"}")
         if [[ -z "$name" || -z "$path" ]]; then cfg_err "$n" "project needs a name and a directory"; continue; fi
+        if cfg_bad_name "$n" project "$name"; then continue; fi
         CFG_PROJECTS="${CFG_PROJECTS}${CFG_PROJECTS:+
 }${name}${tab}$(cfg_expand "$path")"
         ;;
@@ -80,6 +104,7 @@ cfg_load() {
         members=""
         [[ "$rest" == *[[:space:]]* ]] && members=$(cfg_trim "${rest#"$name"}")
         if [[ -z "$name" || -z "$members" ]]; then cfg_err "$n" "group needs a name and members"; continue; fi
+        if cfg_bad_name "$n" group "$name"; then continue; fi
         CFG_GROUPS="${CFG_GROUPS}${CFG_GROUPS:+
 }${name}${tab}${members}"
         ;;
@@ -89,6 +114,10 @@ cfg_load() {
         [[ "$rest" == *[[:space:]]* ]] && val=$(cfg_trim "${rest#"$key"}")
         if [[ -z "$key" ]]; then cfg_err "$n" "set needs a key"; continue; fi
         if ! cfg_is_key "$key"; then cfg_err "$n" "unknown setting '$key'"; continue; fi
+        if ! cfg_number_ok "$key" "$val"; then
+          cfg_err "$n" "setting '$key' must be a number"
+          val=$(cfg_default "$key")   # stored, so it overrides earlier lines
+        fi
         CFG_SETTINGS="${CFG_SETTINGS}${CFG_SETTINGS:+
 }${key}${tab}${val}"
         ;;
@@ -180,7 +209,12 @@ EOT
 }
 
 _res_one() {
-  local arg="$1" members m g saved dir name root roots tried=""
+  local arg="$1" members m g saved dir name root roots tried="" bad
+  [[ -n "$arg" ]] || swarm_die "cannot resolve ''"
+  # A project or group line rejected for its name is never used.
+  if bad=$(_res_lookup "$CFG_INVALID" "$arg"); then
+    swarm_die "${SWARM_CONFIG:-$HOME/.agent-tmux/swarm.conf}: $bad"
+  fi
   if members=$(_res_lookup "$CFG_GROUPS" "$arg"); then
     case "
 $_RES_STACK

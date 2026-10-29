@@ -24,6 +24,39 @@ sed -i '' '/bogus/d' "$SWARM_CONFIG"
 expect "config clean exits 0"   0 "set retile_delay 0.6"          swarm config
 rm "$SWARM_CONFIG"
 expect "missing config = defaults" 0 "root $HOME/workspace"       swarm config
+# Project and group names must be safe in tmux targets; numeric settings must
+# be numbers (an invalid one falls back to the default).
+mkdir -p "$HOME/workspace/my.proj" "$HOME/workspace/x"
+cat > "$SWARM_CONFIG" <<'CONF'
+project my.proj ~/workspace/my.proj
+project ok_1-a ~/workspace/x
+group a.b ok_1-a
+set stall_min soon
+set idle_min 2.5
+set poll_sec
+set retile_delay 0.25
+set retile_delay fast
+CONF
+expect "bad project name" 1 "line 1: invalid project name 'my.proj' (use letters, digits, - and _)" swarm config
+expect "good project name kept" 1 "project ok_1-a $HOME/workspace/x" swarm config
+expect "bad project not listed" 1 "" sh -c "swarm config 2>/dev/null | grep -q 'project my.proj'"
+expect "bad group name" 1 "line 3: invalid group name 'a.b' (use letters, digits, - and _)" swarm config
+expect "stall_min not a number" 1 "line 4: setting 'stall_min' must be a number" swarm config
+expect "idle_min integer"       1 "line 5: setting 'idle_min' must be a number" swarm config
+expect "poll_sec empty"         1 "line 6: setting 'poll_sec' must be a number" swarm config
+expect "retile_delay decimal ok" 1 "" sh -c "swarm config 2>&1 | grep -q 'line 7'"
+expect "retile_delay not a number" 1 "line 8: setting 'retile_delay' must be a number" swarm config
+expect "invalid falls back: stall_min" 1 "set stall_min 20" swarm config
+expect "invalid falls back: idle_min"  1 "set idle_min 2"$'\n' swarm config
+expect "invalid falls back: poll_sec"  1 "set poll_sec 15" swarm config
+expect "invalid falls back: retile_delay" 1 "set retile_delay 0.6" swarm config
+expect "resolve refuses bad project" 1 "line 1: invalid project name 'my.proj'" swarm _resolve my.proj
+expect "open refuses bad project" 1 "line 1: invalid project name 'my.proj'" swarm open my.proj
+expect "resolve refuses bad group" 1 "line 3: invalid group name 'a.b'" swarm _resolve a.b
+printf 'set stall_min 5\nset retile_delay .5\n' > "$SWARM_CONFIG"
+expect "valid numbers accepted" 0 $'set stall_min 5\nset idle_min 2\nset poll_sec 15\nset retile_delay .5' swarm config
+rm "$SWARM_CONFIG"
+
 expect "no args prints usage"   1 "usage: swarm"                  swarm
 expect "unknown dash flag"      1 "usage: swarm"                  swarm --nope
 expect "unknown name is a project" 1 "swarm: error: cannot resolve 'frob'" swarm frob
