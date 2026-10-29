@@ -26,8 +26,8 @@ rm "$SWARM_CONFIG"
 expect "missing config = defaults" 0 "root $HOME/workspace"       swarm config
 expect "no args prints usage"   1 "usage: swarm"                  swarm
 expect "unknown dash flag"      1 "usage: swarm"                  swarm --nope
-expect "unknown subcommand"     1 "swarm: error: unknown subcommand frob" swarm frob
-expect "unknown hidden-looking"  1 "unknown subcommand _bogus"     swarm _bogus
+expect "unknown name is a project" 1 "swarm: error: cannot resolve 'frob'" swarm frob
+expect "underscore name is a project" 1 "cannot resolve '_bogus'" swarm _bogus
 # /bin/sh may be bash in sh mode (macOS), so compare the first pane to a later one.
 t_session shelltest
 t_session shelltest2

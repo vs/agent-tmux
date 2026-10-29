@@ -39,6 +39,10 @@ main() {
   fi
   local sub="$1" s fn
   shift
+  if [[ "$sub" == --own-window ]]; then
+    cmd_open "$sub" "$@"
+    return
+  fi
   if [[ "$sub" == -* ]]; then
     swarm_usage >&2
     exit 1
@@ -53,7 +57,7 @@ main() {
       break
     fi
   done
-  swarm_die "unknown subcommand $sub"
+  cmd_open "$sub" "$@"
 }
 
 main "$@"
