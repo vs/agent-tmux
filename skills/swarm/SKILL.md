@@ -15,7 +15,7 @@ You are the orchestrator in a project's main tab. Lieutenants are separate Claud
 
 ## Writing the brief
 
-Include: the goal; context and pointers (spec and plan paths); constraints; the definition of done; and "use SDD for the plan". Send it on stdin:
+Include: the goal; context and pointers (spec and plan paths); constraints; the definition of done; and "use SDD for the plan". Send it on stdin. Run `swarm delegate` as its own Bash command, never chained after `echo ...;` or other commands: the allow rule `Bash(swarm delegate:*)` only matches a command that starts with `swarm delegate`.
 
 ```bash
 swarm delegate <name> - <<'BRIEF'
@@ -53,7 +53,7 @@ Run one watcher at a time; do not start a second one. When the Monitor expires, 
 
 On `stalled` or `idle-unreported`, run `swarm peek <lt>`, then send a short `SendMessage` to the session `<project>-<lt>` (the project is `$SWARM_PROJECT`): ask for status, point out a closed helper, or redirect. On `over-cap`, tell it to shut helpers down.
 
-- If `swarm peek` shows a permission prompt (the lieutenant's or a helper's), leave it: it's the user's. Don't nudge about it and don't report it.
+- If `swarm peek` shows a permission prompt (the lieutenant's or a helper's), leave it: it's the user's. A helper's permission prompt appears in its lieutenant's pane (the helper's own pane says "Waiting for team lead approval"); it is still the user's to answer. Don't nudge about it and don't report it.
 - At most 2 nudges per condition. After that, leave it.
 - Do not report nudges to the user unless asked.
 - `swarm status` shows the current state of all lieutenants.

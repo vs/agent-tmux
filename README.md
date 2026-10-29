@@ -78,6 +78,8 @@ swarm close <lt>      # stop a lieutenant and close its tab
 
 The orchestrator delegates with `swarm delegate`, through the `swarm` skill: it starts a lieutenant in the project directory, in its own tab, and the lieutenant answers with `swarm report`. `swarm help` lists every command.
 
+A helper's permission prompt shows up in its lieutenant's pane, not the helper's. After updating the plugin from GitHub (`claude plugin update agent-tmux@agent-tmux`), new sessions get the `swarm` skill.
+
 ## /agent-tmux:codex-review
 
 Run in Claude Code, in a tmux window that has exactly one Codex pane:
