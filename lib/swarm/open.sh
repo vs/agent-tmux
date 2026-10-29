@@ -1,4 +1,4 @@
-# `swarm open`: main tabs (shell | orchestrator). Sourced by bin/swarm; bash 3.2.
+# `swarm open`: main tabs (shell | orchestrator over a plain claude). Sourced by bin/swarm; bash 3.2.
 
 # swarm_find_main <project> -> "@win session" of the project's main tab in
 # any session, or nothing. One project has one orchestrator across sessions.
@@ -80,7 +80,7 @@ _open_tag_telegram() {
 # _open_new_tab <session> <project> <dir> <first-window-of-new-session 0|1>
 # Sets _OPEN_WIN, _OPEN_AGENT.
 _open_new_tab() {
-  local session="$1" project="$2" dir="$3" fresh="$4" last out win shellp
+  local session="$1" project="$2" dir="$3" fresh="$4" last out win shellp auxp
   local env=(-e "SWARM_PROJECT=$project" -e SWARM_ROLE=main)
   if [[ $fresh == 1 ]]; then
     out=$(tmx list-windows -t "=$session" -F '#{window_id} #{pane_id}' | head -n 1)
@@ -93,11 +93,17 @@ _open_new_tab() {
     win="${out% *}"; shellp="${out#* }"
   fi
   _OPEN_AGENT=$(tmx split-window -h -d -t "$shellp" -c "$dir" "${env[@]}" -P -F '#{pane_id}')
+  # A plain Claude for the user under the orchestrator (index 2, so the
+  # orchestrator stays the second pane). Started once; never relaunched.
+  auxp=$(tmx split-window -v -d -t "$_OPEN_AGENT" -c "$dir" -P -F '#{pane_id}')
   _OPEN_WIN="$win"
   _open_tag "$win" "$project" "$dir"
   tmx set-option -p -t "$shellp" @name shell
   tmx set-option -p -t "$_OPEN_AGENT" @name "${project}-main"
+  tmx set-option -p -t "$auxp" @name claude
   swarm_retile_window "$win"
+  tmx send-keys -t "$auxp" -l claude
+  tmx send-keys -t "$auxp" Enter
 }
 
 # _open_reattach <session>: for --own-window, open an iTerm window when the

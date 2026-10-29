@@ -17,14 +17,22 @@ mains() { t_tmux list-windows -t home -F '#{window_name} #{@swarm-role} #{@swarm
 expect_eq "tabs in order" "assup-main main assup|code-main main code" "$(mains | tr '\n' '|' | sed 's/|$//')"
 a=$(t_tmux list-windows -t home -F '#{window_id} #{window_name}' | awk '$2=="assup-main"{print $1}')
 c=$(t_tmux list-windows -t home -F '#{window_id} #{window_name}' | awk '$2=="code-main"{print $1}')
-expect_eq "two panes"  "2" "$(t_tmux list-panes -t "$a" | wc -l | tr -d ' ')"
-expect_eq "labels"     "shell assup-main" "$(t_tmux list-panes -t "$a" -F '#{@name}' | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "three panes" "3" "$(t_tmux list-panes -t "$a" | wc -l | tr -d ' ')"
+expect_eq "labels"     "shell assup-main claude" "$(t_tmux list-panes -t "$a" -F '#{@name}' | tr '\n' ' ' | sed 's/ $//')"
 want=$(cd -P "$HOME/workspace/assup" && pwd)
 expect_eq "shell cwd"  "$want" "$(t_tmux display -p -t "$a.0" '#{pane_current_path}')"
 expect_eq "tags"       "assup main $HOME/workspace/assup stack" "$(t_tmux display -p -t "$a" '#{@swarm-project} #{@swarm-role} #{@swarm-dir} #{@swarm-layout}')"
 expect_eq "selected first" "$a" "$(t_tmux display -p -t home '#{window_id}')"
-log2() { [ "$(wc -l < "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
+# Shell full height on the left; orchestrator over the plain claude on the right.
+geo=$(t_tmux list-panes -t "$a" -F '#{pane_left} #{pane_top} #{pane_height}' | tr '\n' '|')
+whgt=$(t_tmux display -p -t "$a" '#{window_height}')
+expect "shell full height"      0 "" test "$(echo "$geo" | cut -d'|' -f1 | cut -d' ' -f3)" = "$whgt"
+expect "right panes share a column" 0 "" test "$(echo "$geo" | cut -d'|' -f2 | cut -d' ' -f1)" = "$(echo "$geo" | cut -d'|' -f3 | cut -d' ' -f1)"
+expect "orchestrator on top"    0 "" test "$(echo "$geo" | cut -d'|' -f2 | cut -d' ' -f2)" -lt "$(echo "$geo" | cut -d'|' -f3 | cut -d' ' -f2)"
+log2() { [ "$(grep -ac -e '--name' "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
 expect "both orchestrators started" 0 "" t_wait 15 log2
+plain2() { [ "$(grep -ac '^$' "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
+expect "plain claudes started" 0 "" t_wait 15 plain2
 expect "orchestrator args" 0 "" grep -aqF -e $'--name\x1fassup-main' "$FAKE_CLAUDE_LOG"
 expect_eq "first owns telegram"   "1" "$(t_tmux show -wv -t "$a" @swarm-telegram)"
 expect_eq "second has no telegram tag" "" "$(t_tmux show -wv -t "$c" @swarm-telegram 2>/dev/null || true)"
@@ -94,7 +102,8 @@ echo '[broken' > "$FAKE_AGENTS_JSON"; expect "bad agents json tolerated" 0 "" sw
 printf 'set telegram_project code\n' > "$SWARM_CONFIG"
 mkdir -p "$HOME/workspace/third"; echo '[]' > "$FAKE_AGENTS_JSON"; : > "$FAKE_CLAUDE_LOG"
 swarm third
-expect "claude started" 0 "" t_wait 15 test -s "$FAKE_CLAUDE_LOG"
+third_logged() { grep -aq third-main "$FAKE_CLAUDE_LOG"; }
+expect "claude started" 0 "" t_wait 15 third_logged
 expect "telegram_project: others off" 0 'enabledPlugins' grep -a third-main "$FAKE_CLAUDE_LOG"
 mkdir -p "$HOME/workspace/solo"
 : > "$FAKE_ITERM_LOG"
@@ -102,7 +111,7 @@ FAKE_ITERM_CODE=0 swarm --own-window solo 2>/dev/null || true
 expect "own-window opens iTerm window" 0 "new-window --session swarm-solo" cat "$FAKE_ITERM_LOG"
 expect "own-window session exists" 0 "" t_tmux has-session -t =swarm-solo
 expect_eq "own-window main tab" "solo-main main" "$(t_tmux list-windows -t =swarm-solo -F '#{window_name} #{@swarm-role}')"
-expect_eq "own-window panes" "2" "$(t_tmux list-panes -t =swarm-solo | wc -l | tr -d ' ')"
+expect_eq "own-window panes" "3" "$(t_tmux list-panes -t =swarm-solo | wc -l | tr -d ' ')"
 # Reattach: second open with no client calls new-window again; with a client it doesn't.
 : > "$FAKE_ITERM_LOG"
 FAKE_ITERM_CODE=0 swarm --own-window solo 2>/dev/null || true

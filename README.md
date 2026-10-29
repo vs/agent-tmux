@@ -66,7 +66,7 @@ group work assup code tmux-agent
 set lt_model opus
 ```
 
-Each tab is a shell on the left and the agent on the right; a lieutenant's tab adds a helper pane under the agent. `swarm layout grid` (run by an agent in its own tab) allows up to three helpers instead of one.
+Each tab is a shell on the left and the agent on the right. A main tab adds a plain `claude` of your own under the orchestrator; a lieutenant's tab adds a helper pane under the agent. `swarm layout grid` (run by an agent in its own tab) allows up to three helpers instead of one.
 
 ```sh
 swarm status          # every swarm tab, its agent state and report

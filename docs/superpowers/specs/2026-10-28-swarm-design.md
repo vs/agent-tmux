@@ -288,8 +288,10 @@ named groups, configurable.)*
   decision): a plain login shell in the project directory on the left half
   (pane index 0, labeled `shell`), and the orchestrator on the right (index 1,
   labeled `<project>-main`). Agent teams are off in the main tab, so no
-  helper panes appear under the orchestrator. Start the orchestrator in the
-  right pane:
+  helper panes appear under the orchestrator. Below the orchestrator (index 2,
+  labeled `claude`) a plain `claude` runs for me, outside the swarm; it is
+  started when the tab is created and never relaunched. Start the
+  orchestrator in the right pane:
   `claude --name <project>-main --settings '{"crossSessionInbound":"accept", <telegram override>}'`,
   with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` explicitly unset (anti-goal),
   and `SWARM_PROJECT`/`SWARM_ROLE=main` exported in the tab's environment.
