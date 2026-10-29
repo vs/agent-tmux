@@ -115,8 +115,7 @@ $ag
 EOT
     astate="$st"
     [[ "$wf" == - ]] || astate="$st $wf"
-    [[ "$sid" == - || "$sid" == "$(swarm_wopt "$win" @swarm-session-id)" ]] \
-      || tmx set-option -w -t "$win" @swarm-session-id "$sid"
+    swarm_record_session_id "$win" "$sid"
     if [[ "$cwd" != - ]]; then
       branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=""
     fi

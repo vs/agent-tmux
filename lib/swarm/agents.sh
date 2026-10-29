@@ -22,6 +22,14 @@ EOT
   return 1
 }
 
+# swarm_record_session_id <@win> <sessionId>: remember the tab's last session
+# id for `open --resume`. "-" (unknown) keeps the old one.
+swarm_record_session_id() {
+  [[ -n "$2" && "$2" != - ]] || return 0
+  [[ "$2" == "$(swarm_wopt "$1" @swarm-session-id)" ]] \
+    || tmx set-option -w -t "$1" @swarm-session-id "$2"
+}
+
 # swarm_settings_json <telegram_on 0|1> -> the --settings JSON for a Claude
 # started by swarm. Telegram off disables the plugin through enabledPlugins.
 swarm_settings_json() {

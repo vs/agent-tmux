@@ -22,9 +22,16 @@ watch_tick() {
   local file active="" win sess name layout report panes agent_pane
   file="$(swarm_state_dir)/watch-$project.active"
   local line st wf cwd sid n since mins ct hash ssince cap npanes
+  local role
   while read -r win sess; do
-    [[ -n "$win" && "$(swarm_wopt "$win" @swarm-project)" == "$project" \
-      && "$(swarm_wopt "$win" @swarm-role)" == lieutenant ]] || continue
+    [[ -n "$win" && "$(swarm_wopt "$win" @swarm-project)" == "$project" ]] || continue
+    role=$(swarm_wopt "$win" @swarm-role)
+    if [[ "$role" == main ]]; then
+      swarm_record_session_id "$win" \
+        "$(printf '%s\n' "$tsv" | awk -F'\t' -v n="$project-main" '$1==n{print $5; exit}')"
+      continue
+    fi
+    [[ "$role" == lieutenant ]] || continue
     name=$(swarm_wopt "$win" @swarm-name)
     layout=$(swarm_wopt "$win" @swarm-layout)
     report=$(swarm_wopt "$win" @swarm-report)
@@ -42,6 +49,7 @@ watch_tick() {
     IFS="$tab" read -r n st wf cwd sid <<EOT
 $line
 EOT
+    swarm_record_session_id "$win" "$sid"
     since=$(swarm_track "watch-state:$project-$name" "$st")
     ssince="$now"
     if [[ -n "$agent_pane" ]]; then

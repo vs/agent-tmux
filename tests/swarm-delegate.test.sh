@@ -29,7 +29,11 @@ expect "empty brief"      1 "empty brief" sh -c "printf '' | TMUX_PANE=$M swarm 
 expect_eq "errors create no window" "$n0" "$(nwin)"
 expect_eq "errors create no run dir" "no" "$([ -e "$SWARM_STATE_DIR/run/assup-auth" ] && echo yes || echo no)"
 
+expect_eq "no session id before delegate" "" "$(t_tmux show -wqv -t "$A" @swarm-session-id)"
+printf '[{"name":"assup-main","status":"busy","sessionId":"sm1"}]' > "$FAKE_AGENTS_JSON"
 expect "delegates" 0 "delegated auth in tab assup:auth (session assup-auth)" sh -c "echo 'Do the thing' | TMUX_PANE=$M swarm delegate auth -"
+expect_eq "delegate records main session id" "sm1" "$(t_tmux show -wqv -t "$A" @swarm-session-id)"
+printf '[{"name":"assup-main","status":"busy"}]' > "$FAKE_AGENTS_JSON"
 order=$(t_tmux list-windows -t home -F '#{window_name}' | tr '\n' ' ')
 expect "inserted after project's tabs" 0 "assup-main assup:auth code-main" echo "$order"
 w=$(win_of assup:auth)
@@ -61,6 +65,8 @@ expect "second after first" 0 "assup-main assup:auth assup:db code-main" echo "$
 db_logged() { grep -a 'assup-db' "$FAKE_CLAUDE_LOG" | grep -aq 'from file'; }
 expect "db started" 0 "" t_wait 15 db_logged
 expect "model override" 0 "" sh -c "grep -a 'assup-db' '$FAKE_CLAUDE_LOG' | grep -qF -- $'--model\x1fsonnet'"
+expect_eq "missing session id keeps the old one" "sm1" "$(t_tmux show -wqv -t "$A" @swarm-session-id)"
+echo '[]' > "$FAKE_AGENTS_JSON"
 
 # Brief survives quoting: quote, \$HOME, newline.
 tricky=$'it\'s "quoted" $HOME `x`\nsecond line'

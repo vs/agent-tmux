@@ -34,6 +34,14 @@ add_helpers() {
   done
 }
 
+# Each tick records the session ids of the project's main and lieutenant tabs.
+CODE_WIN=$(win_of code-main)
+printf '[{"name":"assup-main","status":"idle","sessionId":"m1"},{"name":"assup-auth","status":"busy","sessionId":"l1"},{"name":"code-main","status":"idle","sessionId":"c1"}]' > "$FAKE_AGENTS_JSON"
+tick $T0 >/dev/null
+expect_eq "watch records main session id" "m1" "$(t_tmux show -wqv -t "$MAIN_WIN" @swarm-session-id)"
+expect_eq "watch records lt session id" "l1" "$(t_tmux show -wqv -t "$LT_WIN" @swarm-session-id)"
+expect_eq "watch leaves other projects" "" "$(t_tmux show -wqv -t "$CODE_WIN" @swarm-session-id)"
+
 agents busy;  expect_eq "busy fresh: quiet" "" "$(tick $T0)"
 expect_eq "stalled after 20m" "stalled auth 20" "$(tick $((T0+1200)))"
 expect_eq "fires once" "" "$(tick $((T0+1260)))"

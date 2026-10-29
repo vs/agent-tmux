@@ -51,6 +51,8 @@ cmd_delegate() {
 
   cfg_load
   [[ -n "$model" ]] || model=$(cfg_get lt_model)
+  swarm_record_session_id "$caller" \
+    "$(swarm_agents_tsv | awk -F'\t' -v n="${project}-main" '$1==n{print $5; exit}')"
 
   local run prompt
   run="$(swarm_state_dir)/run/${project}-${name}"
