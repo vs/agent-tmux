@@ -51,6 +51,15 @@ FAKE_AGENTS_FAIL=1 expect "agents failure -> unknown" 0 "unknown" swarm status -
 
 t_tmux send-keys -t "$HELPER" "Do you want to proceed?"; sleep 0.3
 expect_eq "helper waiting heuristic" "waiting" "$(swarm status --all --json | jq -r '..|objects|select(.label=="helper-1")|.state')"
+# A helper whose permission prompt went to its lead shows only a waiting banner.
+t_tmux send-keys -R -t "$HELPER"; t_tmux clear-history -t "$HELPER"
+t_tmux send-keys -t "$HELPER" "Waiting for team lead approval"; sleep 0.3
+expect_eq "helper waiting for team lead" "waiting" "$(swarm status --all --json | jq -r '..|objects|select(.label=="helper-1")|.state')"
+t_tmux send-keys -R -t "$HELPER"; t_tmux clear-history -t "$HELPER"
+t_tmux send-keys -t "$HELPER" "Waiting for permission"; sleep 0.3
+expect_eq "helper waiting for permission" "waiting" "$(swarm status --all --json | jq -r '..|objects|select(.label=="helper-1")|.state')"
+t_tmux send-keys -R -t "$HELPER"; t_tmux clear-history -t "$HELPER"
+t_tmux send-keys -t "$HELPER" "Do you want to proceed?"; sleep 0.3
 expect "peek" 0 "Do you want to proceed?" swarm peek assup:helper-1
 expect "peek pane id" 0 "Do you want to proceed?" swarm peek "$HELPER"
 expect "peek bare name in caller project" 0 "Do you want to proceed?" env TMUX_PANE="$LT_PANE" swarm peek helper-1

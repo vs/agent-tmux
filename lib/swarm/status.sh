@@ -9,7 +9,7 @@ _swarm_screen() {
 
 # swarm_pane_state <%pane> -> waiting|running (heuristic for helper panes).
 swarm_pane_state() {
-  if _swarm_screen "$1" 15 | grep -qE 'Do you want to|❯ 1\. Yes|Allow|Press enter to confirm'; then
+  if _swarm_screen "$1" 15 | grep -qE 'Do you want to|❯ 1\. Yes|Allow|Press enter to confirm|Waiting for team lead approval|Waiting for permission'; then
     echo waiting
   else
     echo running
