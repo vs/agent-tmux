@@ -38,6 +38,14 @@ printf '[{"name":"assup-main","status":"idle","waitingFor":null,"cwd":"x","pid":
 n=$(t_tmux list-windows -t home | wc -l); swarm assup
 expect_eq "reopen: no duplicate" "$n" "$(t_tmux list-windows -t home | wc -l)"
 
+# swarm_pane_idle: a foreground command makes the pane busy.
+pane_idle() { bash -c 'source "$1/lib/swarm/common.sh"; swarm_pane_idle "$2"' _ "$T_REPO" "$1"; }
+fgp=$(t_tmux new-window -d -P -F '#{pane_id}' -t home)
+t_tmux send-keys -t "$fgp" 'sleep 300' Enter
+fgbusy() { ! pane_idle "$fgp"; }
+expect "foreground sleep is busy" 0 "" t_wait 10 fgbusy
+t_tmux kill-pane -t "$fgp"
+
 # Dead orchestrator but busy pane: not typed into, warned.
 echo '[]' > "$FAKE_AGENTS_JSON"; t_tmux set -w -t "$a" @swarm-session-id s1
 before=$(cat "$FAKE_CLAUDE_LOG")
@@ -45,11 +53,17 @@ expect "busy pane warned" 0 "orchestrator pane is busy; not relaunching" swarm a
 sleep 0.5
 expect_eq "busy pane untouched" "$before" "$(cat "$FAKE_CLAUDE_LOG")"
 
-# Free the pane, then resume.
+# Free the pane, then resume. A background child (like powerlevel10k's
+# gitstatusd) doesn't make an idle shell busy.
+apane=$(t_tmux list-panes -t "$a" -F '#{pane_id}' | sed -n 2p)
 apid=$(t_tmux list-panes -t "$a" -F '#{pane_pid}' | sed -n 2p)
 t_tmux send-keys -t "$a.1" C-c
-nochild() { ! pgrep -P "$apid" >/dev/null 2>&1; }
-expect "agent pane idle" 0 "" t_wait 10 nochild
+fg_is_shell() { [ "$(ps -o tpgid= -p "$apid" | tr -d ' ')" = "$apid" ]; }
+expect "agent pane idle" 0 "" t_wait 10 fg_is_shell
+t_tmux send-keys -t "$a.1" 'sleep 300 &' Enter
+haschild() { pgrep -P "$apid" >/dev/null 2>&1; }
+expect "background child running" 0 "" t_wait 10 haschild
+expect "idle with background child" 0 "" pane_idle "$apane"
 : > "$FAKE_CLAUDE_LOG"; swarm assup
 expect "claude started" 0 "" t_wait 15 test -s "$FAKE_CLAUDE_LOG"
 expect "dead orchestrator resumed" 0 "" grep -aqF -e $'--resume\x1fs1' "$FAKE_CLAUDE_LOG"

@@ -102,7 +102,7 @@ _open_reattach() {
 }
 
 cmd_open() {
-  local own=0 res name dir session win sid pane panes pid first="" tab=$'\t'
+  local own=0 res name dir session win sid pane first="" tab=$'\t'
   while [[ $# -gt 0 && "$1" == -* ]]; do
     case "$1" in
       --own-window) own=1; shift ;;
@@ -151,12 +151,10 @@ EOT
         [[ $own == 0 ]] || _open_reattach "$session"
         continue
       fi
-      panes=$(tmx list-panes -t "$win" -F '#{pane_id} #{pane_pid}')
-      pane=$(printf '%s\n' "$panes" | sed -n '2p')
-      pid="${pane#* }"; pane="${pane% *}"
+      pane=$(tmx list-panes -t "$win" -F '#{pane_id}' | sed -n '2p')
       if [[ -z "$pane" ]]; then
         swarm_warn "${name}-main has no orchestrator pane; not relaunching"
-      elif pgrep -P "$pid" >/dev/null 2>&1; then
+      elif ! swarm_pane_idle "$pane"; then
         swarm_warn "orchestrator pane is busy; not relaunching"
       else
         sid=$(swarm_wopt "$win" @swarm-session-id)

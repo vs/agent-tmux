@@ -45,3 +45,15 @@ swarm_caller_window() {
 swarm_sanitize() {
   printf '%s' "$1" | sed 's/[^A-Za-z0-9_-]/-/g'
 }
+
+# swarm_pane_idle <%pane> -> 0 when the pane's shell sits at its prompt, i.e.
+# it owns the terminal's foreground process group. Children don't count:
+# background jobs and prompt helpers (powerlevel10k's gitstatusd) stay out of
+# the foreground.
+swarm_pane_idle() {
+  local pid tpgid
+  pid=$(tmx display-message -p -t "$1" '#{pane_pid}' 2>/dev/null) || return 1
+  [[ -n "$pid" ]] || return 1
+  tpgid=$(ps -o tpgid= -p "$pid" 2>/dev/null | tr -d ' ') || return 1
+  [[ "$tpgid" == "$pid" ]]
+}
