@@ -34,6 +34,15 @@ expect "agent teams unset"        0 "" sh -c "grep -q 'env -u CLAUDE_CODE_EXPERI
 t_tmux send-keys -t "$a.0" 'echo "ENV:$SWARM_PROJECT:$SWARM_ROLE"' Enter; sleep 0.5
 expect "pane env tagged" 0 "ENV:assup:main" t_tmux capture-pane -p -t "$a.0"
 
+# A second open moments later: the owner isn't in `claude agents` yet, but its
+# pane is busy running it, so Telegram stays taken.
+mkdir -p "$HOME/workspace/late"; swarm late
+l=$(t_tmux list-windows -t home -F '#{window_id} #{window_name}' | awk '$2=="late-main"{print $1}')
+late_logged() { grep -aq late-main "$FAKE_CLAUDE_LOG"; }
+expect "late orchestrator started" 0 "" t_wait 15 late_logged
+expect_eq "late open: no telegram tag" "" "$(t_tmux show -wv -t "$l" @swarm-telegram 2>/dev/null || true)"
+expect "late open: telegram off" 0 '"telegram@claude-plugins-official":false' grep -a late-main "$FAKE_CLAUDE_LOG"
+
 printf '[{"name":"assup-main","status":"idle","waitingFor":null,"cwd":"x","pid":1,"sessionId":"s1"},{"name":"code-main","status":"idle","waitingFor":null,"cwd":"x","pid":2,"sessionId":"s2"}]' > "$FAKE_AGENTS_JSON"
 n=$(t_tmux list-windows -t home | wc -l); swarm assup
 expect_eq "reopen: no duplicate" "$n" "$(t_tmux list-windows -t home | wc -l)"

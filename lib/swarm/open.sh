@@ -23,8 +23,15 @@ _open_telegram() {
   fi
   _OPEN_TG=0
   [[ $_OPEN_TG_TAKEN == 0 ]] || return 0
+  # An owner is live when `claude agents` lists it, or when its pane is busy:
+  # an orchestrator started seconds ago may not be listed yet.
+  local names="" pane
   while read -r id tg proj; do
-    if [[ "$tg" == 1 && -n "$proj" ]] && swarm_agent_live "${proj}-main"; then live=1; break; fi
+    [[ "$tg" == 1 && -n "$proj" ]] || continue
+    [[ -n "$names" ]] || names=" $(swarm_agents_tsv | cut -f1 | tr '\n' ' ')"
+    if [[ "$names" == *" ${proj}-main "* ]]; then live=1; break; fi
+    pane=$(tmx list-panes -t "$id" -F '#{pane_id}' 2>/dev/null | sed -n 2p)
+    if [[ -n "$pane" ]] && ! swarm_pane_idle "$pane"; then live=1; break; fi
   done <<EOT
 $(tmx list-windows -a -F '#{window_id} #{@swarm-telegram} #{@swarm-project}' 2>/dev/null || true)
 EOT
