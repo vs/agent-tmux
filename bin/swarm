@@ -34,7 +34,30 @@ swarm_usage() {
   echo "usage: swarm <$list> [args]"
 }
 
-cmd_help() { swarm_usage; }
+# _help_line <subcommand> -> its synopsis and what it does.
+_help_line() {
+  case "$1" in
+    open)     echo "open [--own-window] <name|group|path>...  open projects' main tabs (also: swarm <name>...)" ;;
+    delegate) echo "delegate <name> [--model M] [--layout stack|grid] (--brief-file F | -)  start a lieutenant (main tab only)" ;;
+    status)   echo "status [--json] [--all]       swarm tabs, agent states and reports" ;;
+    peek)     echo "peek <name|project:name|%pane> [-n lines]  the last lines of an agent's pane" ;;
+    report)   echo "report <done|blocked> <text>  set your tab's report (lieutenants only)" ;;
+    close)    echo "close <name|project:name>     stop a lieutenant and close its tab" ;;
+    watch)    echo "watch [--project P] [--once]  print stalled, idle-unreported and over-cap lieutenants" ;;
+    layout)   echo "layout <stack|grid>           switch your lieutenant tab's layout" ;;
+    config)   echo "config                        print the parsed config and any errors" ;;
+    help)     echo "help                          this list" ;;
+  esac
+}
+
+cmd_help() {
+  local s
+  swarm_usage
+  echo
+  for s in $SWARM_SUBCOMMANDS; do
+    [[ "$s" == _* ]] || echo "  $(_help_line "$s")"
+  done
+}
 
 main() {
   if [[ $# -eq 0 ]]; then

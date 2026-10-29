@@ -13,7 +13,7 @@ talk to each other, and ask Codex for a review with one command.
 | `lib/swarm/` | Shell modules behind `swarm` (config, open, delegate, layout, status, watch). |
 | `skills/swarm` | Claude Code skill that teaches an orchestrator to use `swarm delegate`. |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
-| `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders. |
+| `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
 | `.claude-plugin/` | Makes the repo a Claude Code plugin and its own marketplace. |
 | `install.sh` | Sets up what the plugin can't (Codex, tmux, permissions). Safe to re-run. |
 
@@ -55,7 +55,7 @@ swarm assup tmux-agent      # projects, groups or paths, in the order given
 swarm open --own-window work   # the only way to get a new iTerm window
 ```
 
-Without `--own-window`, tabs go into your current iTerm window. Projects already open are selected, not duplicated.
+Without `--own-window`, tabs go into the tmux session shown in your iTerm hotkey window (or the one named by `set session` in the config). Projects already open are selected, not duplicated.
 
 Config lives in `~/.agent-tmux/swarm.conf` (line-based; `swarm config` prints what it parsed and any errors):
 
@@ -71,10 +71,12 @@ Each tab is a shell on the left and the agent on the right; a lieutenant's tab a
 ```sh
 swarm status          # every swarm tab, its agent state and report
 swarm peek <lt>       # the last lines of a lieutenant's pane
-swarm close <lt>      # stop a lieutenant and close its tab (asks first)
+swarm close <lt>      # stop a lieutenant and close its tab
 ```
 
-The orchestrator delegates with `swarm delegate`, through the `swarm` skill: it starts a lieutenant in the project directory, in its own tab, and the lieutenant answers with `swarm report`. Run `swarm help` for the rest.
+`install.sh` leaves `swarm close` off Claude Code's allow list, so Claude Code asks your permission whenever an agent runs it. `swarm close` itself doesn't ask: run from your own shell, it closes the tab at once.
+
+The orchestrator delegates with `swarm delegate`, through the `swarm` skill: it starts a lieutenant in the project directory, in its own tab, and the lieutenant answers with `swarm report`. `swarm help` lists every command.
 
 ## /agent-tmux:codex-review
 

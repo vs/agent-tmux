@@ -57,6 +57,12 @@ printf 'set stall_min 5\nset retile_delay .5\n' > "$SWARM_CONFIG"
 expect "valid numbers accepted" 0 $'set stall_min 5\nset idle_min 2\nset poll_sec 15\nset retile_delay .5' swarm config
 rm "$SWARM_CONFIG"
 
+hlp=$(swarm help 2>&1)
+expect "help exits 0" 0 "usage: swarm" swarm help
+for sub in open delegate status peek report close watch layout config help; do
+  expect_eq "help lists $sub" "1" "$(printf '%s\n' "$hlp" | grep -c "^  $sub\b")"
+done
+expect_eq "help hides internal commands" "0" "$(printf '%s\n' "$hlp" | grep -c '_retile\|_resolve\|_home')"
 expect "no args prints usage"   1 "usage: swarm"                  swarm
 expect "unknown dash flag"      1 "usage: swarm"                  swarm --nope
 expect "unknown name is a project" 1 "swarm: error: cannot resolve 'frob'" swarm frob
