@@ -1,14 +1,17 @@
 # `swarm open`: main tabs (shell | orchestrator). Sourced by bin/swarm; bash 3.2.
 
-# swarm_main_window <session> <project> -> @id of the main tab, or nothing.
-swarm_main_window() {
-  local id
-  for id in $(swarm_windows "$1" @swarm-project "$2"); do
-    if [[ "$(swarm_wopt "$id" @swarm-role)" == main ]]; then
-      echo "$id"
+# swarm_find_main <project> -> "@win session" of the project's main tab in
+# any session, or nothing. One project has one orchestrator across sessions.
+swarm_find_main() {
+  local id role proj sess
+  while IFS='|' read -r id role proj sess; do
+    if [[ -n "$id" && "$role" == main && "$proj" == "$1" ]]; then
+      echo "$id $sess"
       return 0
     fi
-  done
+  done <<EOT
+$(tmx list-windows -a -F '#{window_id}|#{@swarm-role}|#{@swarm-project}|#{session_name}' 2>/dev/null || true)
+EOT
   return 0
 }
 
@@ -120,25 +123,35 @@ cmd_open() {
   cfg_load   # cfg_resolve runs in a subshell, so load here for cfg_get
   res=$(cfg_resolve "$@") || exit 1
 
-  local home=""
-  if [[ $own == 0 ]]; then
-    home=$(swarm_home_session) || exit 1
-    # Refuse a name clash before creating anything.
-    while IFS="$tab" read -r name dir; do
-      [[ -n "$name" ]] || continue
-      win=$(swarm_main_window "$home" "$name")
-      if [[ -n "$win" && "$(swarm_wopt "$win" @swarm-dir)" != "$dir" ]]; then
-        swarm_die "project '$name' is already open from $(swarm_wopt "$win" @swarm-dir)"
-      fi
-    done <<EOT
+  local home="" found
+  [[ $own == 1 ]] || home=$(swarm_home_session) || exit 1
+  # Refuse clashes before creating anything: the name taken by another
+  # directory, or the project open in its own window when asked for home (or
+  # the reverse).
+  while IFS="$tab" read -r name dir; do
+    [[ -n "$name" ]] || continue
+    found=$(swarm_find_main "$name")
+    [[ -n "$found" ]] || continue
+    win="${found%% *}"; session="${found#* }"
+    if [[ "$(swarm_wopt "$win" @swarm-dir)" != "$dir" ]]; then
+      swarm_die "project '$name' is already open from $(swarm_wopt "$win" @swarm-dir)"
+    fi
+    if [[ $own == 1 && "$session" != "swarm-$name" ]] \
+       || [[ $own == 0 && "$session" == "swarm-$name" ]]; then
+      swarm_die "project '$name' is already open in session '$session'"
+    fi
+  done <<EOT
 $res
 EOT
-  fi
 
   while IFS="$tab" read -r name dir; do
     [[ -n "$name" ]] || continue
     local fresh=0
-    if [[ $own == 1 ]]; then
+    found=$(swarm_find_main "$name")
+    if [[ -n "$found" ]]; then
+      # Reuse the tab where it is, even if another session was home then.
+      session="${found#* }"
+    elif [[ $own == 1 ]]; then
       session="swarm-$name"
       if ! tmx has-session -t "=$session" 2>/dev/null; then
         tmx new-session -d -s "$session" -c "$dir" -e "SWARM_PROJECT=$name" -e SWARM_ROLE=main
@@ -148,11 +161,8 @@ EOT
       session="$home"
     fi
 
-    win=$(swarm_main_window "$session" "$name")
-    if [[ -n "$win" ]]; then
-      if [[ "$(swarm_wopt "$win" @swarm-dir)" != "$dir" ]]; then
-        swarm_die "project '$name' is already open from $(swarm_wopt "$win" @swarm-dir)"
-      fi
+    if [[ -n "$found" ]]; then
+      win="${found%% *}"
       if swarm_agent_live "${name}-main"; then
         [[ -n "$first" ]] || first="$win"
         [[ $own == 0 ]] || _open_reattach "$session"

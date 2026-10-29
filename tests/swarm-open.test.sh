@@ -96,22 +96,41 @@ mkdir -p "$HOME/workspace/third"; echo '[]' > "$FAKE_AGENTS_JSON"; : > "$FAKE_CL
 swarm third
 expect "claude started" 0 "" t_wait 15 test -s "$FAKE_CLAUDE_LOG"
 expect "telegram_project: others off" 0 'enabledPlugins' grep -a third-main "$FAKE_CLAUDE_LOG"
+mkdir -p "$HOME/workspace/solo"
 : > "$FAKE_ITERM_LOG"
-FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
-expect "own-window opens iTerm window" 0 "new-window --session swarm-code" cat "$FAKE_ITERM_LOG"
-expect "own-window session exists" 0 "" t_tmux has-session -t =swarm-code
-expect_eq "own-window main tab" "code-main main" "$(t_tmux list-windows -t =swarm-code -F '#{window_name} #{@swarm-role}')"
-expect_eq "own-window panes" "2" "$(t_tmux list-panes -t =swarm-code | wc -l | tr -d ' ')"
+FAKE_ITERM_CODE=0 swarm --own-window solo 2>/dev/null || true
+expect "own-window opens iTerm window" 0 "new-window --session swarm-solo" cat "$FAKE_ITERM_LOG"
+expect "own-window session exists" 0 "" t_tmux has-session -t =swarm-solo
+expect_eq "own-window main tab" "solo-main main" "$(t_tmux list-windows -t =swarm-solo -F '#{window_name} #{@swarm-role}')"
+expect_eq "own-window panes" "2" "$(t_tmux list-panes -t =swarm-solo | wc -l | tr -d ' ')"
 # Reattach: second open with no client calls new-window again; with a client it doesn't.
 : > "$FAKE_ITERM_LOG"
-FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
-expect "own-window reopen reattaches" 0 "new-window --session swarm-code" cat "$FAKE_ITERM_LOG"
-(sleep 600 | t_tmux -C attach -t swarm-code) >/dev/null 2>&1 &
+FAKE_ITERM_CODE=0 swarm --own-window solo 2>/dev/null || true
+expect "own-window reopen reattaches" 0 "new-window --session swarm-solo" cat "$FAKE_ITERM_LOG"
+(sleep 600 | t_tmux -C attach -t swarm-solo) >/dev/null 2>&1 &
 ctl2=$!; disown "$ctl2"; sleep 0.5
 : > "$FAKE_ITERM_LOG"
-FAKE_ITERM_CODE=0 swarm --own-window code 2>/dev/null || true
+FAKE_ITERM_CODE=0 swarm --own-window solo 2>/dev/null || true
 expect_eq "own-window with client: no new window" "" "$(cat "$FAKE_ITERM_LOG")"
 pkill -P "$ctl2" 2>/dev/null || true; kill "$ctl2" 2>/dev/null || true
+
+# A project is open in one session only.
+expect "own-window refuses a project open at home" 1 "project 'assup' is already open in session 'home'" swarm --own-window assup
+expect "no own-window session created" 1 "" t_tmux has-session -t =swarm-assup
+nh=$(t_tmux list-windows -t home | wc -l)
+expect "home refuses a project open in its own window" 1 "project 'solo' is already open in session 'swarm-solo'" swarm solo
+expect_eq "home unchanged" "$nh" "$(t_tmux list-windows -t home | wc -l)"
+# Opened while another session was home: reused there, not duplicated.
+t_session elsewhere; mkdir -p "$HOME/workspace/fourth"
+printf 'set session elsewhere\n' > "$SWARM_CONFIG"
+swarm fourth
+expect_eq "opened in configured session" "1" "$(t_tmux list-windows -t elsewhere -F '#{window_name}' | grep -c '^fourth-main$')"
+rm -f "$SWARM_CONFIG"
+printf '[{"name":"fourth-main","status":"idle","sessionId":"f1"}]' > "$FAKE_AGENTS_JSON"
+swarm fourth
+expect_eq "other session: no duplicate at home" "$nh" "$(t_tmux list-windows -t home | wc -l)"
+expect_eq "other session: still one tab" "1" "$(t_tmux list-windows -a -F '#{window_name}' | grep -c '^fourth-main$')"
+echo '[]' > "$FAKE_AGENTS_JSON"
 
 # Launcher fallback (stand-in commands).
 lw() { bash -c 'source "$1"; shift; swarm_write_launcher "$@"' _ "$T_REPO/lib/swarm/agents.sh" "$@"; }
@@ -123,7 +142,7 @@ rm -f "$WORK/fb"
 lw "$WORK/l2.sh" "$WORK" sh -c 'exit 130' --else sh -c "echo fb >> '$WORK/fb'"
 bash "$WORK/l2.sh"
 expect_eq "interrupt skips fallback" "" "$(cat "$WORK/fb" 2>/dev/null)"
-expect "home never opens a window" 1 "" sh -c "grep -v swarm-code '$FAKE_ITERM_LOG' | grep -q new-window"
+expect "home never opens a window" 1 "" sh -c "grep -v swarm-solo '$FAKE_ITERM_LOG' | grep -q new-window"
 
 pkill -P "$ctl" 2>/dev/null || true
 kill "$ctl" 2>/dev/null || true
