@@ -75,3 +75,27 @@ swarm_orchestrator_cmd() {
     --settings "$(swarm_settings_json "$2")"
   if [[ -n "${3:-}" ]]; then printf '%s\n' --resume "$3"; fi
 }
+
+# swarm_now -> epoch seconds ($SWARM_NOW overrides, for tests).
+swarm_now() { echo "${SWARM_NOW:-$(date +%s)}"; }
+
+# swarm_track <key> <value> -> records key<TAB>value<TAB>since in track.tsv;
+# since resets when the value changed or the key is new. Echoes since.
+swarm_track() {
+  local f now old_v="" since tmp
+  f="$(swarm_state_dir)/track.tsv"
+  now=$(swarm_now)
+  if [[ -f "$f" ]]; then
+    old_v=$(awk -F'\t' -v k="$1" '$1==k{print $2"\t"$3; exit}' "$f")
+  fi
+  if [[ -n "$old_v" && "${old_v%%$'\t'*}" == "$2" ]]; then
+    since="${old_v#*$'\t'}"
+  else
+    since="$now"
+    tmp="$f.$$"
+    { [[ ! -f "$f" ]] || awk -F'\t' -v k="$1" '$1!=k' "$f"
+      printf '%s\t%s\t%s\n' "$1" "$2" "$since"; } > "$tmp"
+    mv "$tmp" "$f"
+  fi
+  echo "$since"
+}
