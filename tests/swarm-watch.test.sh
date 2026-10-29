@@ -68,6 +68,17 @@ agents busy; tick $T2 >/dev/null
 GIT_COMMITTER_DATE="$((T2 + 600)) +0000" git -C "$REPO_DIR" commit -q --allow-empty -m new
 expect_eq "new commit prevents stalled" "" "$(tick $((T2+1260)))"
 
+# idle-unreported waits for the last helper pane to close: a teams lead sits
+# idle while its teammates work.
+t_tmux set -wu -t "$LT_WIN" @swarm-report
+T3=$((T2+3000))
+agents idle; expect_eq "idle with helpers: quiet" "" "$(tick $T3)"
+expect_eq "idle with helpers past idle_min: quiet" "" "$(tick $((T3+600)))"
+for p in $(t_tmux list-panes -t "$LT_WIN" -F '#{pane_id}' | sed 1,2d); do t_tmux kill-pane -t "$p"; done
+expect_eq "helpers closed: clock restarts" "" "$(tick $((T3+610)))"
+expect_eq "helpers closed: quiet before idle_min" "" "$(tick $((T3+729)))"
+expect_eq "helpers closed: fires after idle_min" "idle-unreported auth" "$(tick $((T3+730)))"
+
 FAKE_AGENTS_FAIL=1 expect "agents failure: no output, exit 0" 0 "" swarm watch --project assup --once
 expect "watch outside swarm tab" 1 "needs --project" env -u TMUX_PANE swarm watch --once
 expect "watch bad arg" 1 "usage" swarm watch --bogus

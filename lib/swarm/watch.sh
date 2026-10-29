@@ -21,7 +21,7 @@ watch_tick() {
   stall=$(cfg_get stall_min); idle_min=$(cfg_get idle_min)
   local file active="" win sess name layout report panes agent_pane
   file="$(swarm_state_dir)/watch-$project.active"
-  local line st wf cwd sid n since mins ct hash ssince cap npanes
+  local line st wf cwd sid n since mins ct hash ssince cap npanes nhelpers tracked
   local role
   while read -r win sess; do
     [[ -n "$win" && "$(swarm_wopt "$win" @swarm-project)" == "$project" ]] || continue
@@ -36,12 +36,13 @@ watch_tick() {
     layout=$(swarm_wopt "$win" @swarm-layout)
     report=$(swarm_wopt "$win" @swarm-report)
     panes=$(tmx list-panes -t "$win" -F '#{pane_id}' 2>/dev/null)
-    npanes=$(printf '%s\n' "$panes" | grep -c .)
+    npanes=$(printf '%s\n' "$panes" | grep -c . || true)
+    nhelpers=$((npanes - 2)); [[ $nhelpers -ge 0 ]] || nhelpers=0
     agent_pane=$(printf '%s\n' "$panes" | sed -n 2p)
 
     cap=1; [[ "$layout" == grid ]] && cap=3
-    if [[ $((npanes - 2)) -gt $cap ]]; then
-      active="${active}over-cap $name $((npanes - 2))"$'\n'
+    if [[ $nhelpers -gt $cap ]]; then
+      active="${active}over-cap $name $nhelpers"$'\n'
     fi
 
     line=$(printf '%s\n' "$tsv" | awk -F'\t' -v n="$project-$name" '$1==n{print; exit}')
@@ -50,7 +51,10 @@ watch_tick() {
 $line
 EOT
     swarm_record_session_id "$win" "$sid"
-    since=$(swarm_track "watch-state:$project-$name" "$st")
+    # Idle time counts from the last helper pane closing: a lead waiting on
+    # its teammates is idle but not stuck.
+    tracked="$st"; [[ "$st" != idle ]] || tracked="idle:$nhelpers"
+    since=$(swarm_track "watch-state:$project-$name" "$tracked")
     ssince="$now"
     if [[ -n "$agent_pane" ]]; then
       hash=$(tmx capture-pane -p -t "$agent_pane" 2>/dev/null | cksum)
@@ -66,7 +70,7 @@ EOT
           fi
         fi ;;
       idle)
-        if [[ $((now - since)) -ge $((idle_min * 60)) && -z "$report" ]]; then
+        if [[ $nhelpers == 0 && $((now - since)) -ge $((idle_min * 60)) && -z "$report" ]]; then
           active="${active}idle-unreported $name"$'\n'
         fi ;;
     esac
