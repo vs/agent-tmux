@@ -104,13 +104,16 @@ $panes
 EOT
 }
 
-# _layout_tagged <session> -> @ids of windows with @swarm-role main/lieutenant.
-# One tmux call: this runs from global hooks on every split and kill-pane.
+# _layout_tagged <session> -> @ids of windows with @swarm-role main/lieutenant,
+# except zoomed ones (select-layout would unzoom them). One tmux call: this
+# runs from global hooks on every split and kill-pane.
 _layout_tagged() {
-  local id role
-  tmx list-windows -t "=$1" -F '#{window_id} #{@swarm-role}' 2>/dev/null | while read -r id role; do
-    case "$role" in main | lieutenant) echo "$id" ;; esac
-  done
+  local id zoomed role
+  tmx list-windows -t "=$1" -F '#{window_id} #{window_zoomed_flag} #{@swarm-role}' 2>/dev/null \
+    | while read -r id zoomed role; do
+      [[ "$zoomed" != 1 ]] || continue
+      case "$role" in main | lieutenant) echo "$id" ;; esac
+    done
 }
 
 # cmd__retile_session <session> [--now]: run by the after-split-window and

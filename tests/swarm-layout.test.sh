@@ -105,6 +105,10 @@ start=$(date +%s); swarm _retile-session test
 expect_eq "tagged session: waits retile_delay" "1" "$(( $(date +%s) - start >= 1 ))"
 expect_eq "tagged session: retiled after delay" "120" "$(t_tmux display -p -t "$m.0" '#{pane_width}')"
 rm -f "$SWARM_CONFIG"
+z=$(mkwin lieutenant stack 1)
+t_tmux resize-pane -Z -t "$z.1"
+swarm _retile-session test --now
+expect_eq "zoomed window stays zoomed" "1" "$(t_tmux display -p -t "$z" '#{window_zoomed_flag}')"
 
 # --- checksum ----------------------------------------------------------------
 expect_eq "checksum: tmux man page vector" "bb62" "$(csum '159x48,0,0{79x48,0,0,79x48,80,0}')"
