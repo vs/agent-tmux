@@ -42,6 +42,7 @@ link() {
 # Claude Code gets both skills and bin/ from the plugin itself.
 
 link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
+link "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
 
 # Earlier versions linked the skills into ~/.claude/skills; with the plugin
@@ -71,16 +72,54 @@ if tmux list-sessions >/dev/null 2>&1; then
   tmux source-file "$REPO/config/tmux.conf"
 fi
 
-# --- Claude Code: allow tmux-bridge without prompting ---
+# --- swarm: starter config and iTerm helper venv ---
+
+swarm_conf="$HOME/.agent-tmux/swarm.conf"
+if [[ -e "$swarm_conf" ]]; then
+  info "ok      $swarm_conf"
+else
+  mkdir -p "$(dirname "$swarm_conf")"
+  cp "$REPO/config/swarm.conf.example" "$swarm_conf"
+  info "created $swarm_conf"
+fi
+
+if [[ "${AGENT_TMUX_SKIP_VENV:-0}" == 1 ]]; then
+  info "skipped iTerm helper venv (AGENT_TMUX_SKIP_VENV=1)"
+elif ! command -v python3 >/dev/null 2>&1; then
+  info "warning: python3 not found; iTerm tab placement and hotkey detection are disabled"
+else
+  venv="$HOME/.agent-tmux/venv"
+  if "$venv/bin/python" -I -c 'import iterm2' >/dev/null 2>&1; then
+    info "ok      $venv has iterm2"
+  elif python3 -m venv "$venv" && "$venv/bin/pip" install -q iterm2; then
+    info "installed iterm2 into $venv"
+  else
+    info "warning: could not install iterm2 into $venv; iTerm tab placement and hotkey detection are disabled"
+  fi
+fi
+
+# --- Claude Code: allow tmux-bridge and swarm without prompting ---
+# Not `swarm close`: killing a running lieutenant should always ask.
 
 claude_settings="$HOME/.claude/settings.json"
-claude_rule='Bash(tmux-bridge:*)'
+claude_rules=('Bash(tmux-bridge:*)')
+for sub in open delegate status peek report watch layout config; do
+  claude_rules+=("Bash(swarm $sub:*)")
+done
+mkdir -p "$(dirname "$claude_settings")"
 [[ -f "$claude_settings" ]] || echo '{}' > "$claude_settings"
-if jq -e --arg r "$claude_rule" '.permissions.allow // [] | index($r)' "$claude_settings" >/dev/null; then
-  info "ok      Claude Code allows $claude_rule"
-else
+missing=()
+for rule in "${claude_rules[@]}"; do
+  if jq -e --arg r "$rule" '.permissions.allow // [] | index($r)' "$claude_settings" >/dev/null; then
+    info "ok      Claude Code allows $rule"
+  else
+    missing+=("$rule")
+  fi
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
   cp "$claude_settings" "$claude_settings.bak-$TS"
-  jq --arg r "$claude_rule" '.permissions.allow = ((.permissions.allow // []) + [$r])' \
+  jq --argjson add "$(printf '%s\n' "${missing[@]}" | jq -R . | jq -s .)" \
+    '.permissions.allow = ((.permissions.allow // []) + $add)' \
     "$claude_settings" > "$claude_settings.tmp"
   mv "$claude_settings.tmp" "$claude_settings"
   info "updated $claude_settings (backup: $claude_settings.bak-$TS)"

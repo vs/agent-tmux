@@ -1,0 +1,23 @@
+# agent-tmux swarm config. Line-based, not sourced bash. Blank lines and #
+# comments are ignored; ~ is expanded. Run `swarm config` to check it.
+
+# where bare project names are looked up, in order (default: ~/workspace)
+root ~/workspace
+# root ~/workspace/sandbox
+
+# names that don't match a directory
+# project tmux-agent ~/workspace/tmux
+
+# groups: `swarm work` opens every member, in order
+# group work assup code tmux-agent
+# group ot   opentherapy ira
+
+# settings (defaults shown)
+# set session          auto     # home session; auto = detect
+# set lt_model         opus
+# set stall_min        20
+# set idle_min         2
+# set poll_sec         15
+# set retile_delay     0.6
+# set telegram_project          # unset: first orchestrator owns Telegram
+# set telegram_plugin  telegram@claude-plugins-official
