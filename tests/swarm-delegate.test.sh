@@ -20,6 +20,9 @@ brief() { printf '%s' "$1" | d "${@:2}" -; }
 U=$(t_tmux new-window -d -P -F '#{pane_id}' -t home)
 nwin() { t_tmux list-windows -t home | wc -l | tr -d ' '; }
 n0=$(nwin)
+# last_arg <session>: the last argument claude got for that session (the log
+# is \x1f-separated; the brief spans lines but holds no \x1f).
+last_arg() { local all; all=$(cat "$FAKE_CLAUDE_LOG"); all="${all##*--name$'\x1f'"$1"$'\x1f'}"; printf '%s' "${all##*$'\x1f'}"; }
 
 expect "outside main tab" 1 "must be run from a project's main tab" sh -c "echo hi | TMUX_PANE=$U swarm delegate x -"
 expect "no TMUX_PANE"     1 "not inside a tmux pane" sh -c "echo hi | env -u TMUX_PANE swarm delegate x -"
@@ -42,10 +45,11 @@ want=$(cd -P "$HOME/workspace/assup" && pwd)
 expect_eq "lt cwd is project dir" "$want" "$(t_tmux display -p -t "$w.1" '#{pane_current_path}')"
 expect_eq "tags" "lieutenant auth assup $HOME/workspace/assup stack" "$(t_tmux display -p -t "$w" '#{@swarm-role} #{@swarm-name} #{@swarm-project} #{@swarm-dir} #{@swarm-layout}')"
 expect_eq "focus unchanged" "$A" "$(t_tmux display -p -t home '#{window_id}')"
-lt_logged() { grep -a 'assup-auth' "$FAKE_CLAUDE_LOG" | grep -aq 'Do the thing'; }
+lt_logged() { grep -aq 'Do the thing' "$FAKE_CLAUDE_LOG"; }
 expect "lieutenant started" 0 "" t_wait 15 lt_logged
-line=$(grep -a 'assup-auth' "$FAKE_CLAUDE_LOG" | grep -a 'Do the thing')
-for want in "--teammate-mode"$'\x1f'"tmux" "--model"$'\x1f'"opus" '"telegram@claude-plugins-official":false' "--append-system-prompt-file"$'\x1f'"$SWARM_STATE_DIR/run/assup-auth/prompt.md" $'\x1f'"Do the thing"; do
+expect_eq "brief is the last arg" "Task brief from assup-main:"$'\n\n'"Do the thing" "$(last_arg assup-auth)"
+line=$(grep -a 'assup-auth' "$FAKE_CLAUDE_LOG")
+for want in "--teammate-mode"$'\x1f'"tmux" "--model"$'\x1f'"opus" '"telegram@claude-plugins-official":false' "--append-system-prompt-file"$'\x1f'"$SWARM_STATE_DIR/run/assup-auth/prompt.md" $'\x1f'"Task brief from assup-main:"; do
   expect "launch arg: $want" 0 "" grep -qF -- "$want" <<<"$line"; done
 run="$SWARM_STATE_DIR/run/assup-auth"
 expect "agent teams on" 0 "" grep -q 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1' "$run/launch.sh"
@@ -62,7 +66,7 @@ printf 'from file\n' > "$WORK/b.md"
 expect "brief file + model" 0 "delegated db" env TMUX_PANE="$M" swarm delegate db --model sonnet --brief-file "$WORK/b.md"
 order=$(t_tmux list-windows -t home -F '#{window_name}' | tr '\n' ' ')
 expect "second after first" 0 "assup-main assup:auth assup:db code-main" echo "$order"
-db_logged() { grep -a 'assup-db' "$FAKE_CLAUDE_LOG" | grep -aq 'from file'; }
+db_logged() { grep -aq 'from file' "$FAKE_CLAUDE_LOG"; }
 expect "db started" 0 "" t_wait 15 db_logged
 expect "model override" 0 "" sh -c "grep -a 'assup-db' '$FAKE_CLAUDE_LOG' | grep -qF -- $'--model\x1fsonnet'"
 expect_eq "missing session id keeps the old one" "sm1" "$(t_tmux show -wqv -t "$A" @swarm-session-id)"
@@ -73,8 +77,15 @@ tricky=$'it\'s "quoted" $HOME `x`\nsecond line'
 expect "tricky brief" 0 "delegated q" sh -c "printf '%s' \"\$1\" | TMUX_PANE=$M swarm delegate q -" _ "$tricky"
 q_logged() { grep -aq 'second line' "$FAKE_CLAUDE_LOG"; }
 expect "tricky logged" 0 "" t_wait 15 q_logged
-got=$(awk 'BEGIN{RS="\n"} /assup-q/{p=1} p{print}' "$FAKE_CLAUDE_LOG" | sed 's/^.*\x1f\(it'"'"'s\)/\1/')
-expect_eq "brief arrives verbatim" "$tricky" "$got"
+expect_eq "brief arrives verbatim after a header" "Task brief from assup-main:"$'\n\n'"$tricky" "$(last_arg assup-q)"
+expect_eq "brief.md is the raw brief" "$tricky" "$(cat "$SWARM_STATE_DIR/run/assup-q/brief.md")"
+
+# A brief starting with - never reaches claude as an option.
+dashb=$'- Goal: fix it\n- Done: tests pass'
+expect "dash brief" 0 "delegated dash" sh -c "printf '%s' \"\$1\" | TMUX_PANE=$M swarm delegate dash -" _ "$dashb"
+dash_logged() { grep -aq 'Done: tests pass' "$FAKE_CLAUDE_LOG"; }
+expect "dash brief logged" 0 "" t_wait 15 dash_logged
+expect_eq "dash brief prefixed" "Task brief from assup-main:"$'\n\n'"$dashb" "$(last_arg assup-dash)"
 
 FAKE_ITERM_CODE=3
 expect "place-tab failure only warns" 0 "stays at the end" sh -c "echo x | TMUX_PANE=$M swarm delegate warn -"

@@ -54,7 +54,7 @@ cmd_delegate() {
   swarm_record_session_id "$caller" \
     "$(swarm_agents_tsv | awk -F'\t' -v n="${project}-main" '$1==n{print $5; exit}')"
 
-  local run prompt
+  local run prompt first_msg
   run="$(swarm_state_dir)/run/${project}-${name}"
   mkdir -p "$run"
   printf '%s\n' "$brief" > "$run/brief.md"
@@ -64,6 +64,8 @@ cmd_delegate() {
   prompt="${prompt//\{\{PARENT\}\}/${project}-main}"
   prompt="${prompt//\{\{DIR\}\}/$dir}"
   printf '%s\n' "$prompt" > "$run/prompt.md"
+  # The header keeps a brief that starts with - from being read as an option.
+  first_msg="Task brief from ${project}-main:"$'\n\n'"$brief"
 
   local env=(-e "SWARM_PROJECT=$project" -e SWARM_ROLE=lieutenant) out win shellp ltp
   out=$(tmx new-window -d -a -t "$last" -n "${project}:${name}" -c "$dir" "${env[@]}" \
@@ -82,7 +84,7 @@ cmd_delegate() {
   swarm_write_launcher "$run/launch.sh" "$dir" \
     env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --name "${project}-${name}" \
     --teammate-mode tmux --model "$model" --settings "$(swarm_settings_json 0)" \
-    --append-system-prompt-file "$run/prompt.md" "$brief"
+    --append-system-prompt-file "$run/prompt.md" "$first_msg"
   tmx send-keys -t "$ltp" -l "bash '$run/launch.sh'"
   tmx send-keys -t "$ltp" Enter
 
