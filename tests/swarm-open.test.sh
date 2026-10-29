@@ -151,6 +151,8 @@ expect_eq "here: no new tab"     "$nw" "$(t_tmux list-windows -t home | wc -l | 
 expect_eq "here: tab tagged"     "here1-main main here1" "$(t_tmux display -p -t "$hw" '#{window_name} #{@swarm-role} #{@swarm-project}')"
 expect_eq "here: caller is shell" "$hp shell" "$(t_tmux list-panes -t "$hw" -F '#{pane_id} #{@name}' | head -n 1)"
 expect_eq "here: labels"         "shell here1-main claude" "$(t_tmux list-panes -t "$hw" -F '#{@name}' | tr '\n' ' ' | sed 's/ $//')"
+here1_cwd() { [ "$(t_tmux display -p -t "$hp" '#{pane_current_path}')" = "$(cd -P "$HOME/workspace/here1" && pwd)" ]; }
+expect "here: shell moved to the project" 0 "" t_wait 10 here1_cwd
 here1_logged() { grep -aq here1-main "$FAKE_CLAUDE_LOG"; }
 expect "here: orchestrator started" 0 "" t_wait 15 here1_logged
 # A group from a plain tab in another session: the first takes the tab, the

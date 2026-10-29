@@ -139,7 +139,7 @@ cmd_open() {
   cfg_load   # cfg_resolve runs in a subshell, so load here for cfg_get
   res=$(cfg_resolve "$@") || exit 1
 
-  local home="" here="" found shellp
+  local home="" here="" herecd="" found shellp
   if [[ $own == 0 ]]; then
     # Run from a plain tab: the first new project takes it, and the rest go
     # into its session.
@@ -184,6 +184,7 @@ EOT
       fi
     else
       session="$home"
+      if [[ -n "$here" ]]; then herecd="$dir"; fi
       shellp="$here"; here=""
     fi
 
@@ -221,4 +222,10 @@ EOT
 $res
 EOT
   [[ -z "$first" ]] || tmx select-window -t "$first"
+  # The caller's shell is the tab's shell pane but can't be moved from here:
+  # type the cd for it to run once swarm exits.
+  if [[ -n "$herecd" ]]; then
+    tmx send-keys -t "$TMUX_PANE" -l " cd -- $(printf '%q' "$herecd")"
+    tmx send-keys -t "$TMUX_PANE" Enter
+  fi
 }
