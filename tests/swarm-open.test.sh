@@ -33,6 +33,9 @@ log2() { [ "$(grep -ac -e '--name' "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
 expect "both orchestrators started" 0 "" t_wait 15 log2
 plain2() { [ "$(grep -ac '^$' "$FAKE_CLAUDE_LOG")" -ge 2 ]; }
 expect "plain claudes started" 0 "" t_wait 15 plain2
+no_typed() { ! t_tmux capture-pane -p -t "$1" | grep -qE "launcher|\.sh'|claude"; }
+expect "orchestrator screen clear" 0 "" t_wait 10 no_typed "$a.1"
+expect "plain claude screen clear" 0 "" t_wait 10 no_typed "$a.2"
 expect "orchestrator args" 0 "" grep -aqF -e $'--name\x1fassup-main' "$FAKE_CLAUDE_LOG"
 expect_eq "first owns telegram"   "1" "$(t_tmux show -wv -t "$a" @swarm-telegram)"
 expect_eq "second has no telegram tag" "" "$(t_tmux show -wv -t "$c" @swarm-telegram 2>/dev/null || true)"
@@ -153,6 +156,8 @@ expect_eq "here: caller is shell" "$hp shell" "$(t_tmux list-panes -t "$hw" -F '
 expect_eq "here: labels"         "shell here1-main claude" "$(t_tmux list-panes -t "$hw" -F '#{@name}' | tr '\n' ' ' | sed 's/ $//')"
 here1_cwd() { [ "$(t_tmux display -p -t "$hp" '#{pane_current_path}')" = "$(cd -P "$HOME/workspace/here1" && pwd)" ]; }
 expect "here: shell moved to the project" 0 "" t_wait 10 here1_cwd
+here1_clear() { ! t_tmux capture-pane -p -t "$hp" | grep -q 'cd --'; }
+expect "here: no cd on screen" 0 "" t_wait 10 here1_clear
 here1_logged() { grep -aq here1-main "$FAKE_CLAUDE_LOG"; }
 expect "here: orchestrator started" 0 "" t_wait 15 here1_logged
 # A group from a plain tab in another session: the first takes the tab, the

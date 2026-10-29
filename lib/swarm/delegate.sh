@@ -85,7 +85,7 @@ cmd_delegate() {
     env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --name "${project}-${name}" \
     --teammate-mode tmux --model "$model" --settings "$(swarm_settings_json 0)" \
     --append-system-prompt-file "$run/prompt.md" "$first_msg"
-  tmx send-keys -t "$ltp" -l "bash '$run/launch.sh'"
+  tmx send-keys -t "$ltp" -l " clear; bash '$run/launch.sh'"
   tmx send-keys -t "$ltp" Enter
 
   for id in $(swarm_windows "=$session" @swarm-project "$project"); do

@@ -47,6 +47,8 @@ expect_eq "tags" "lieutenant auth assup $HOME/workspace/assup stack" "$(t_tmux d
 expect_eq "focus unchanged" "$A" "$(t_tmux display -p -t home '#{window_id}')"
 lt_logged() { grep -aq 'Do the thing' "$FAKE_CLAUDE_LOG"; }
 expect "lieutenant started" 0 "" t_wait 15 lt_logged
+lt_clear() { ! t_tmux capture-pane -p -t "$w.1" | grep -q 'launch.sh'; }
+expect "lieutenant screen clear" 0 "" t_wait 10 lt_clear
 expect_eq "brief is the last arg" "Task brief from assup-main:"$'\n\n'"Do the thing" "$(last_arg assup-auth)"
 line=$(grep -a 'assup-auth' "$FAKE_CLAUDE_LOG")
 for want in "--teammate-mode"$'\x1f'"tmux" "--model"$'\x1f'"opus" '"telegram@claude-plugins-official":false' "--append-system-prompt-file"$'\x1f'"$SWARM_STATE_DIR/run/assup-auth/prompt.md" $'\x1f'"Task brief from assup-main:"; do

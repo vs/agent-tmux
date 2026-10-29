@@ -287,7 +287,9 @@ named groups, configurable.)*
   swarm tab, the first project not yet open takes that tab: it's renamed
   `<project>-main`, my pane becomes the shell pane, and the other panes are
   added to it. Swarm can't move my shell, so as it exits it types
-  ` cd -- <dir>` into that pane for the shell to run. That tab's session is home for the run, so other projects go
+  ` cd -- <dir> && clear` into that pane for the shell to run. Commands
+  swarm types into agent panes also start with ` clear;`, so every pane
+  shows only its shell or agent, not the setup. That tab's session is home for the run, so other projects go
   there too. Any other tab is left alone. *(Your request, after v0.2.0.)*
 - Otherwise append a window named `<project>-main` at the end of the session,
   tag it, and give it **the same layout as a lieutenant tab** (your

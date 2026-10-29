@@ -43,6 +43,8 @@ EOT
 }
 
 # _open_launch <project> <dir> <agent pane> <resume id>: type the launcher in.
+# Typed lines start with a space (kept out of shell history) and clear the
+# screen, so the pane shows only the agent.
 _open_launch() {
   local project="$1" dir="$2" pane="$3" sid="$4" launcher cmd=() fresh=() w
   launcher="$(swarm_state_dir)/run/${project}-main.sh"
@@ -57,7 +59,7 @@ EOT
   else
     swarm_write_launcher "$launcher" "$dir" "${fresh[@]}"
   fi
-  tmx send-keys -t "$pane" -l "bash '$launcher'"
+  tmx send-keys -t "$pane" -l " clear; bash '$launcher'"
   tmx send-keys -t "$pane" Enter
 }
 
@@ -112,7 +114,7 @@ _open_new_tab() {
   tmx set-option -p -t "$_OPEN_AGENT" @name "${project}-main"
   tmx set-option -p -t "$auxp" @name claude
   swarm_retile_window "$win"
-  tmx send-keys -t "$auxp" -l claude
+  tmx send-keys -t "$auxp" -l " clear; claude"
   tmx send-keys -t "$auxp" Enter
 }
 
@@ -225,7 +227,7 @@ EOT
   # The caller's shell is the tab's shell pane but can't be moved from here:
   # type the cd for it to run once swarm exits.
   if [[ -n "$herecd" ]]; then
-    tmx send-keys -t "$TMUX_PANE" -l " cd -- $(printf '%q' "$herecd")"
+    tmx send-keys -t "$TMUX_PANE" -l " cd -- $(printf '%q' "$herecd") && clear"
     tmx send-keys -t "$TMUX_PANE" Enter
   fi
 }
