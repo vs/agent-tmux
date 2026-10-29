@@ -35,6 +35,9 @@ expect_eq "json: main idle" "idle" "$(swarm status --all --json | jq -r '.[] | s
 expect_eq "session id recorded" "s1" "$(t_tmux show -wv -t "$MAIN_WIN" @swarm-session-id)"
 expect_eq "lt keeps no session id" "" "$(t_tmux show -wqv -t "$LT_WIN" @swarm-session-id)"
 expect "waiting shows what" 0 "waiting approve" sh -c "echo '[{\"name\":\"assup-auth\",\"status\":\"waiting\",\"waitingFor\":\"approve\"}]' > '$FAKE_AGENTS_JSON'; swarm status --all"
+echo '[{"name":"assup-auth","status":"busy"}]' > "$FAKE_AGENTS_JSON"
+expect_eq "no cwd: empty in json" "" "$(swarm status --all --json | jq -r '.[] | .tabs[] | select(.name=="assup:auth") | .cwd')"
+expect_eq "no cwd: not shown in text" "1" "$(swarm status --all | grep '^  assup:auth' | grep -c 'report: -$')"
 cat > "$FAKE_AGENTS_JSON" <<JSON
 [{"name":"assup-main","status":"idle","sessionId":"s1","cwd":"$cwd"},
  {"name":"assup-auth","status":"busy","cwd":"$cwd"}]

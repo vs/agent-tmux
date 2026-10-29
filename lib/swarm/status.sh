@@ -116,7 +116,9 @@ EOT
     astate="$st"
     [[ "$wf" == - ]] || astate="$st $wf"
     swarm_record_session_id "$win" "$sid"
-    if [[ "$cwd" != - ]]; then
+    if [[ "$cwd" == - ]]; then
+      cwd=""
+    else
       branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=""
     fi
   else
