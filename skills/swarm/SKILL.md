@@ -38,7 +38,7 @@ Add `--layout grid` only when the work is meant to run parallel helpers from the
 After the first delegation, start `swarm watch` with the Monitor tool. It is a long-running command; each stdout line is an event. Never poll with sleep loops.
 
 ```
-Monitor: swarm watch
+Monitor with command: "swarm watch", description: "swarm lieutenants", timeout_ms: 1800000
 ```
 
 Lines look like:
@@ -47,12 +47,13 @@ Lines look like:
 - `idle-unreported <lt>`: idle without having reported done or blocked
 - `over-cap <lt> <n>`: more helper panes than allowed
 
-Start it once; do not start a second watcher.
+Run one watcher at a time; do not start a second one. When the Monitor expires, start it again.
 
 ## Nudging
 
 On `stalled` or `idle-unreported`, run `swarm peek <lt>`, then send a short `SendMessage` to the session `<project>-<lt>` (the project is `$SWARM_PROJECT`): ask for status, point out a closed helper, or redirect. On `over-cap`, tell it to shut helpers down.
 
+- If `swarm peek` shows a permission prompt (the lieutenant's or a helper's), leave it: it's the user's. Don't nudge about it and don't report it.
 - At most 2 nudges per condition. After that, leave it.
 - Do not report nudges to the user unless asked.
 - `swarm status` shows the current state of all lieutenants.
