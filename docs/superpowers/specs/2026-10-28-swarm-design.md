@@ -283,6 +283,11 @@ named groups, configurable.)*
   `--resume <last session id>`, so it keeps what it knew about running
   lieutenants. Fall back to a fresh start if the resume fails. The session
   id is kept in the window option `@swarm-session-id`. *(My call.)*
+- Run (without `--own-window`) from a tab that has one pane and isn't a
+  swarm tab, the first project not yet open takes that tab: it's renamed
+  `<project>-main`, my pane becomes the shell pane, and the other panes are
+  added to it. That tab's session is home for the run, so other projects go
+  there too. Any other tab is left alone. *(Your request, after v0.2.0.)*
 - Otherwise append a window named `<project>-main` at the end of the session,
   tag it, and give it **the same layout as a lieutenant tab** (your
   decision): a plain login shell in the project directory on the left half

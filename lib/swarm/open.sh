@@ -77,14 +77,24 @@ _open_tag_telegram() {
   fi
 }
 
-# _open_new_tab <session> <project> <dir> <first-window-of-new-session 0|1>
-# Sets _OPEN_WIN, _OPEN_AGENT.
+# _open_here_pane -> the caller's pane when its tab can become a main tab:
+# a single pane, not a swarm tab. Else nothing.
+_open_here_pane() {
+  [[ -n "${TMUX_PANE:-}" ]] || return 0
+  local out
+  out=$(tmx display-message -p -t "$TMUX_PANE" '#{window_panes}|#{@swarm-role}' 2>/dev/null) || return 0
+  [[ "$out" == "1|" ]] || return 0
+  echo "$TMUX_PANE"
+}
+
+# _open_new_tab <session> <project> <dir> [<shell pane>]: with a shell pane
+# (a new session's first window, or the caller's tab), build the tab around
+# it; else append a new window. Sets _OPEN_WIN, _OPEN_AGENT.
 _open_new_tab() {
-  local session="$1" project="$2" dir="$3" fresh="$4" last out win shellp auxp
+  local session="$1" project="$2" dir="$3" shellp="${4:-}" last out win auxp
   local env=(-e "SWARM_PROJECT=$project" -e SWARM_ROLE=main)
-  if [[ $fresh == 1 ]]; then
-    out=$(tmx list-windows -t "=$session" -F '#{window_id} #{pane_id}' | head -n 1)
-    win="${out% *}"; shellp="${out#* }"
+  if [[ -n "$shellp" ]]; then
+    win=$(tmx display-message -p -t "$shellp" '#{window_id}')
     tmx rename-window -t "$win" "${project}-main"
   else
     last=$(tmx list-windows -t "=$session" -F '#{window_id}' | tail -n 1)
@@ -129,8 +139,17 @@ cmd_open() {
   cfg_load   # cfg_resolve runs in a subshell, so load here for cfg_get
   res=$(cfg_resolve "$@") || exit 1
 
-  local home="" found
-  [[ $own == 1 ]] || home=$(swarm_home_session) || exit 1
+  local home="" here="" found shellp
+  if [[ $own == 0 ]]; then
+    # Run from a plain tab: the first new project takes it, and the rest go
+    # into its session.
+    here=$(_open_here_pane)
+    if [[ -n "$here" ]]; then
+      home=$(tmx display-message -p -t "$here" '#{session_name}')
+    else
+      home=$(swarm_home_session) || exit 1
+    fi
+  fi
   # Refuse clashes before creating anything: the name taken by another
   # directory, or the project open in its own window when asked for home (or
   # the reverse).
@@ -152,7 +171,7 @@ EOT
 
   while IFS="$tab" read -r name dir; do
     [[ -n "$name" ]] || continue
-    local fresh=0
+    shellp=""
     found=$(swarm_find_main "$name")
     if [[ -n "$found" ]]; then
       # Reuse the tab where it is, even if another session was home then.
@@ -161,10 +180,11 @@ EOT
       session="swarm-$name"
       if ! tmx has-session -t "=$session" 2>/dev/null; then
         tmx new-session -d -s "$session" -c "$dir" -e "SWARM_PROJECT=$name" -e SWARM_ROLE=main
-        fresh=1
+        shellp=$(tmx list-panes -t "=$session" -F '#{pane_id}' | head -n 1)
       fi
     else
       session="$home"
+      shellp="$here"; here=""
     fi
 
     if [[ -n "$found" ]]; then
@@ -191,7 +211,7 @@ EOT
     fi
 
     _open_telegram "$name"
-    _open_new_tab "$session" "$name" "$dir" "$fresh"
+    _open_new_tab "$session" "$name" "$dir" "$shellp"
     _open_tag_telegram "$_OPEN_WIN"
     _open_launch "$name" "$dir" "$_OPEN_AGENT" ""
     [[ -n "$first" ]] || first="$_OPEN_WIN"

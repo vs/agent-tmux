@@ -55,7 +55,7 @@ swarm assup tmux-agent      # projects, groups or paths, in the order given
 swarm open --own-window work   # the only way to get a new iTerm window
 ```
 
-Without `--own-window`, tabs go into the tmux session shown in your iTerm hotkey window (or the one named by `set session` in the config). Projects already open are selected, not duplicated.
+Without `--own-window`, tabs go into the tmux session shown in your iTerm hotkey window (or the one named by `set session` in the config). Run from a tab with a single plain pane, the first new project takes that tab instead (your pane becomes its shell), and the rest go into the same session. Projects already open are selected, not duplicated.
 
 Config lives in `~/.agent-tmux/swarm.conf` (line-based; `swarm config` prints what it parsed and any errors):
 

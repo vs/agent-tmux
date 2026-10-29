@@ -141,6 +141,41 @@ expect_eq "other session: no duplicate at home" "$nh" "$(t_tmux list-windows -t 
 expect_eq "other session: still one tab" "1" "$(t_tmux list-windows -a -F '#{window_name}' | grep -c '^fourth-main$')"
 echo '[]' > "$FAKE_AGENTS_JSON"
 
+# Run from a plain tab: that tab becomes the main tab.
+mkdir -p "$HOME/workspace"/{here1,here2,here3,here4,here5}
+hp=$(t_tmux new-window -d -P -F '#{pane_id}' -t home)
+hw=$(t_tmux display -p -t "$hp" '#{window_id}')
+nw=$(t_tmux list-windows -t home | wc -l | tr -d " ")
+TMUX_PANE=$hp swarm here1
+expect_eq "here: no new tab"     "$nw" "$(t_tmux list-windows -t home | wc -l | tr -d " ")"
+expect_eq "here: tab tagged"     "here1-main main here1" "$(t_tmux display -p -t "$hw" '#{window_name} #{@swarm-role} #{@swarm-project}')"
+expect_eq "here: caller is shell" "$hp shell" "$(t_tmux list-panes -t "$hw" -F '#{pane_id} #{@name}' | head -n 1)"
+expect_eq "here: labels"         "shell here1-main claude" "$(t_tmux list-panes -t "$hw" -F '#{@name}' | tr '\n' ' ' | sed 's/ $//')"
+here1_logged() { grep -aq here1-main "$FAKE_CLAUDE_LOG"; }
+expect "here: orchestrator started" 0 "" t_wait 15 here1_logged
+# A group from a plain tab in another session: the first takes the tab, the
+# rest join that session.
+printf 'group hg here2 here3\n' > "$SWARM_CONFIG"
+ep=$(t_tmux new-window -d -P -F '#{pane_id}' -t elsewhere)
+ew=$(t_tmux display -p -t "$ep" '#{window_id}')
+TMUX_PANE=$ep swarm hg
+expect_eq "here group: first takes the tab" "here2-main" "$(t_tmux display -p -t "$ew" '#{window_name}')"
+expect_eq "here group: rest in its session" "1" "$(t_tmux list-windows -t elsewhere -F '#{window_name}' | grep -c '^here3-main$')"
+rm -f "$SWARM_CONFIG"
+# A swarm tab or a tab with several panes is left alone.
+sp=$(t_tmux list-panes -t "$a" -F '#{pane_id}' | head -n 1)
+nw=$(t_tmux list-windows -t home | wc -l | tr -d " ")
+TMUX_PANE=$sp swarm here4
+expect_eq "swarm tab: new tab" "$((nw + 1))" "$(t_tmux list-windows -t home | wc -l | tr -d " ")"
+expect_eq "swarm tab: untouched" "assup-main 3" "$(t_tmux display -p -t "$a" '#{window_name} #{window_panes}')"
+mp=$(t_tmux new-window -d -P -F '#{pane_id}' -t home -n mine)
+t_tmux split-window -d -t "$mp"
+mw=$(t_tmux display -p -t "$mp" '#{window_id}')
+nw=$(t_tmux list-windows -t home | wc -l | tr -d " ")
+TMUX_PANE=$mp swarm here5
+expect_eq "busy tab: new tab" "$((nw + 1))" "$(t_tmux list-windows -t home | wc -l | tr -d " ")"
+expect_eq "busy tab: untouched" "mine 2 " "$(t_tmux display -p -t "$mw" '#{window_name} #{window_panes} #{@swarm-role}')"
+
 # Launcher fallback (stand-in commands).
 lw() { bash -c 'source "$1"; shift; swarm_write_launcher "$@"' _ "$T_REPO/lib/swarm/agents.sh" "$@"; }
 rm -f "$WORK/fb"
