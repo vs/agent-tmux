@@ -10,6 +10,16 @@ _watch_commit_time() {
   echo "${t:-0}"
 }
 
+# watch_screen_norm: stdin screen -> stdout with what changes on a busy but
+# stuck Claude Code screen removed: the "esc to interrupt" status line, all
+# digits (timers, token counts) and spinner glyphs. Byte-wise (LC_ALL=C), with
+# each glyph matched as a whole UTF-8 sequence.
+watch_screen_norm() {
+  { LC_ALL=C grep -vi 'esc to interrupt' || true; } \
+    | LC_ALL=C tr -d '0-9' \
+    | LC_ALL=C sed -E 's/(✻|✽|✶|✳|✢|·|⏺|◐|◓|◑|◒|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|\*)//g'
+}
+
 # watch_tick <project>: one pass over the project's lieutenants. Prints each
 # condition that is newly active; $STATE/watch-<project>.active remembers them.
 watch_tick() {
@@ -57,7 +67,7 @@ EOT
     since=$(swarm_track "watch-state:$project-$name" "$tracked")
     ssince="$now"
     if [[ -n "$agent_pane" ]]; then
-      hash=$(tmx capture-pane -p -t "$agent_pane" 2>/dev/null | cksum)
+      hash=$(tmx capture-pane -p -t "$agent_pane" 2>/dev/null | watch_screen_norm | cksum)
       ssince=$(swarm_track "watch-screen:$agent_pane" "$hash")
     fi
     case "$st" in

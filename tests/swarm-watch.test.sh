@@ -79,6 +79,18 @@ expect_eq "helpers closed: clock restarts" "" "$(tick $((T3+610)))"
 expect_eq "helpers closed: quiet before idle_min" "" "$(tick $((T3+729)))"
 expect_eq "helpers closed: fires after idle_min" "idle-unreported auth" "$(tick $((T3+730)))"
 
+# The stall check hashes a normalized screen: Claude Code's spinner, timer and
+# token counter change every tick while it is busy.
+norm() { printf '%s\n' "$1" | bash -c 'source "$1/lib/swarm/watch.sh"; watch_screen_norm' _ "$T_REPO" | cksum; }
+s1=$'● Doing it\n✻ Thinking… (12s · ↑ 1.2k tokens · esc to interrupt)\n> '
+s2=$'● Doing it\n✽ Pondering… (47s · ↓ 3.4k tokens · ESC to interrupt)\n> '
+expect_eq "norm: timer line ignored" "$(norm "$s1")" "$(norm "$s2")"
+expect_eq "norm: digits ignored" "$(norm 'Run 3 of 10, 12:01')" "$(norm 'Run 4 of 10, 12:07')"
+expect_eq "norm: spinner glyph ignored" "$(norm '⠋ Working * x')" "$(norm '⠙ Working · x')"
+expect_eq "norm: glyph set" "$(norm 'ab')" "$(norm '✻a✽✶✳✢·⏺◐◓◑◒⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏*b')"
+if [[ "$(norm $'● Doing it\n> ')" != "$(norm $'● Done it\n> ')" ]]; then t_pass "norm: content change differs"; else t_fail "norm: content change differs" "hashes equal"; fi
+if [[ "$(norm '│ box ─')" != "$(norm '│ bot ─')" ]]; then t_pass "norm: other unicode kept"; else t_fail "norm: other unicode kept" "hashes equal"; fi
+
 FAKE_AGENTS_FAIL=1 expect "agents failure: no output, exit 0" 0 "" swarm watch --project assup --once
 expect "watch outside swarm tab" 1 "needs --project" env -u TMUX_PANE swarm watch --once
 expect "watch bad arg" 1 "usage" swarm watch --bogus
