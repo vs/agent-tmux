@@ -181,8 +181,34 @@ in a scratch tmux session.
     back to shell plus lieutenant, side by side, when they exited. Labels
     from `--agent-name` worked.
 25. **Hook quoting:** `#{session_id}` expands to `$12`, which `sh` reads as
-    a variable, so the hook passed garbage and silently did nothing. Pass
-    `'#{session_name}'` in quotes (or escape the `$`).
+    a variable, so the hook passed garbage and silently did nothing. Shipped
+    form: pass the unquoted `#{q:session_name}`, which tmux shell-escapes (the
+    quoted `'#{session_name}'` form broke on names with `"`, `$` or backticks).
+
+Verified in the live check (2026-10-29):
+
+26. **Teammates inherit the lead's `--settings`.** Seen in a helper's args:
+    `--settings {"crossSessionInbound":"accept","enabledPlugins":{"telegram@claude-plugins-official":false}}`.
+    No Telegram process started for the lieutenant or its helpers.
+27. **A teammate's permission prompt is forwarded to its lead.** The prompt is
+    answered in the lieutenant's pane; the helper pane shows "Waiting for team
+    lead approval"; `claude agents --json` shows the lieutenant `waiting` /
+    `permission prompt`.
+28. **`claude --name X --resume <id>` keeps the name `X` and the same
+    sessionId.** `swarm open` on a project whose orchestrator had exited
+    resumed it in place (pane idle detection via the terminal foreground
+    process group works with zsh + powerlevel10k).
+29. **iTerm Python API in the venv:** `hotkey-windows` returned session 0's
+    windows; new tabs were appended at the end of the hotkey window and the
+    user's own tabs kept their order; no iTerm window was opened.
+30. **Stack and grid layouts held** with real teammate panes coming and going
+    (1 helper, then 2 in parallel); labels came from `--agent-name`.
+31. **The allow rule `Bash(swarm delegate:*)` does not match a compound
+    command** (`echo ...; swarm delegate ...`).
+32. **Quitting an orchestrator whose `swarm watch` Monitor is running** shows
+    Claude Code's "stop tasks / move to background / stay" dialog.
+
+`--own-window` was not exercised in the live check.
 
 ## Design
 
@@ -422,7 +448,7 @@ overwrites one.
 In `config/tmux.conf`, already sourced by `~/.tmux.conf`:
 
 - Global hooks `after-split-window` and `after-kill-pane` run
-  `run-shell -b "~/.local/bin/swarm _retile-session '#{session_name}'"`
+  `run-shell -b "~/.local/bin/swarm _retile-session #{q:session_name}"`
   (fact 25). Use a
   fixed array index, e.g. `after-split-window[90]`, so re-sourcing doesn't
   add duplicates and doesn't clobber my own hooks. They have to be global or
@@ -554,12 +580,17 @@ It teaches the orchestrator:
 ## Left to the builder
 
 - How to find the new iTerm window's session id: `it2` or osascript
-  (fact 18).
+  (fact 18). Answered: iTerm API `Window.async_create` (unverified live;
+  `--own-window` was not tested).
 - Whether teammates inherit plugin overrides (fact 21), and the fallback if
-  they don't.
+  they don't. Answered: they inherit `--settings` (fact 26).
 - Helper state detection from screen text (what a permission prompt looks
-  like in a teammate pane).
+  like in a teammate pane). Answered: the prompt goes to the lieutenant's
+  pane (fact 27); the status heuristic matches the helper's "Waiting for team
+  lead approval" banner.
 - The state-file format and the exact `status` text layout.
 - The re-tile delay, if 0.6 s turns out flaky under load. Re-check with
-  iTerm attached, since control-mode clients resize windows.
-- Whether `--resume` keeps `--name`, or has to be passed again.
+  iTerm attached, since control-mode clients resize windows. Answered: not
+  needed (fact 30).
+- Whether `--resume` keeps `--name`, or has to be passed again. Answered: it
+  keeps it (fact 28).
