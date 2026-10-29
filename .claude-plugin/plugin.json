@@ -1,6 +1,6 @@
 {
   "name": "agent-tmux",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Let Claude Code and Codex agents in tmux panes talk to each other, and ask Codex for a review with /agent-tmux:codex-review, and run a swarm of Claude sessions as iTerm tabs",
   "author": {"name": "Semyon Vadishev"},
   "repository": "https://github.com/vs/agent-tmux",
