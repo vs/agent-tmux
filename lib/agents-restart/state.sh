@@ -7,15 +7,18 @@
 # ---- Claude ----------------------------------------------------------------
 
 # ar_claude_refresh -> sets AR_CLAUDE_TSV: "pid status waitingFor sessionId" per
-# line, "-" for null/empty. Call once per poll cycle. On failure it is left empty.
+# line, "-" for null/empty, and AR_CLAUDE_OK=1 when `claude agents --json`
+# succeeded (0 when it failed; the TSV is then empty). Call once per poll cycle.
 ar_claude_refresh() {
   local json
-  AR_CLAUDE_TSV=""
+  AR_CLAUDE_TSV=""; AR_CLAUDE_OK=0
   json=$(claude agents --json 2>/dev/null </dev/null) || return 0
   AR_CLAUDE_TSV=$(printf '%s' "$json" | jq -r '
     if type == "array" then .[] else empty end
-    | [ (.pid // "" | tostring), (.status // ""), (.waitingFor // "" | tostring), (.sessionId // "") ]
-    | map(if . == "" then "-" else gsub("[\t\n]"; " ") end) | @tsv' 2>/dev/null) || AR_CLAUDE_TSV=""
+    | select(type == "object")
+    | [ (.pid // "" | tostring), (.status // "" | tostring), (.waitingFor // "" | tostring), (.sessionId // "" | tostring) ]
+    | map(if . == "" then "-" else gsub("[\t\n]"; " ") end) | @tsv' 2>/dev/null) || return 0
+  AR_CLAUDE_OK=1
 }
 
 # _ar_claude_row <pid> -> the TSV row for that pid, or empty.
@@ -40,14 +43,15 @@ ar_screen() {
     }' || true
 }
 
-# _ar_clean: stdin lines -> stdout "<kind><TAB><text>" per line, where text has
-# all escape sequences removed. With mode "dim", text inside SGR 2 (dim) runs is
-# dropped as well (mode "plain" keeps it). NBSP becomes a space. kind is "R" for
-# a horizontal rule line, "I" for a line starting with the prompt glyph, else "O".
+# _ar_clean: stdin lines -> stdout "<kind><TAB><plain><TAB><nodim>" per line.
+# plain has all escape sequences removed; nodim additionally drops text inside
+# SGR 2 (dim) runs. NBSP becomes a space, tabs become spaces. kind is "R" for a
+# horizontal rule line, "I" for a line starting with the prompt glyph, else "O"
+# (classified on plain text, so dim rules and prompts still count).
 _ar_clean() {
-  LC_ALL=C awk -v mode="$1" '
+  LC_ALL=C awk '
     function clean(line,   out, i, n, c, j, params, np, k, p, dim, fin, x, skip) {
-      out = ""; dim = 0; n = length(line); i = 1
+      out = ""; OUTD = ""; dim = 0; n = length(line); i = 1
       while (i <= n) {
         c = substr(line, i, 1)
         if (c == "\033") {
@@ -87,10 +91,12 @@ _ar_clean() {
           }
           continue
         }
-        if (!(dim && mode == "dim")) out = out c
+        out = out c
+        if (!dim) OUTD = OUTD c
         i++
       }
-      gsub(/\302\240/, " ", out)
+      gsub(/\302\240/, " ", out); gsub(/\302\240/, " ", OUTD)
+      gsub(/\t/, " ", out); gsub(/\t/, " ", OUTD)
       return out
     }
     {
@@ -99,46 +105,56 @@ _ar_clean() {
       kind = "O"
       if (s ~ /^\342\224\200\342\224\200/) kind = "R"
       else if (substr(s, 1, 3) == "\342\235\257") kind = "I"
-      print kind "\t" t
+      print kind "\t" t "\t" OUTD
     }'
 }
 
-# ar_input_text <screen> -> text of Claude's input box: the first line after the
-# prompt glyph (plus any continuation lines) between the two bottom-most rules,
-# with dim runs (the placeholder) removed, whitespace-trimmed.
-ar_input_text() {
-  printf '%s\n' "$1" | _ar_clean dim | LC_ALL=C awk -F'\t' '
-    { kind[NR] = $1; txt[NR] = substr($0, 3) }
+# _ar_input_box <screen> -> "ok<TAB>text" when the input box is positively
+# identified (the two bottom-most rule lines with a prompt-glyph line between
+# them); text is all non-dim content in the box (placeholder removed), trimmed.
+# Prints "bad" otherwise.
+_ar_input_box() {
+  printf '%s\n' "$1" | _ar_clean | LC_ALL=C awk -F'\t' '
+    { kind[NR] = $1; nd[NR] = $3 }
     END {
       bot = 0; top = 0
       for (i = NR; i >= 1; i--) if (kind[i] == "R") { if (!bot) bot = i; else { top = i; break } }
-      if (!bot || !top) {
-        # No complete box: fall back to the last prompt line.
-        for (i = NR; i >= 1; i--) if (kind[i] == "I") { top = i - 1; bot = NR + 1; break }
-        if (!top && !bot) exit
-      }
+      if (!bot || !top) { print "bad"; exit }
       out = ""; seen = 0
       for (i = top + 1; i < bot; i++) {
-        t = txt[i]
-        if (!seen) {
+        t = nd[i]
+        if (!seen && kind[i] == "I") {
+          seen = 1
           s = t; sub(/^[ \t]+/, "", s)
-          if (substr(s, 1, 3) != "\342\235\257") continue
-          t = substr(s, 4); seen = 1
+          if (substr(s, 1, 3) == "\342\235\257") t = substr(s, 4)
         }
         out = out " " t
       }
+      if (!seen) { print "bad"; exit }
       gsub(/^[ \t]+|[ \t]+$/, "", out)
       gsub(/[ \t]+/, " ", out)
-      print out
+      print "ok\t" out
     }'
 }
 
+# ar_input_text <screen> -> non-dim text in Claude'"'"'s input box, trimmed; empty when
+# the box is empty or not recognized (check ar_input_box_ok for the latter).
+ar_input_text() {
+  local r; r=$(_ar_input_box "$1")
+  [[ "$r" == ok* ]] && printf '%s\n' "${r#ok	}" || true
+}
+
+# ar_input_box_ok <screen> -> 0 when the input box is positively identified.
+ar_input_box_ok() {
+  [[ "$(_ar_input_box "$1" | head -1)" == ok* ]]
+}
+
 # ar_claude_background <screen> -> e.g. "1 shell" / "2 background tasks", or empty.
-# Looks below the input box: footer segments after "·" such as "· 1 shell", and
-# subagent rows of the agent panel ("◯ name  description").
+# Looks anywhere below the input box for "N shell(s)|background task(s)|agent(s)|
+# monitor(s)|teammate(s)", plus subagent rows of the agent panel ("◯ name  ...").
 ar_claude_background() {
-  printf '%s\n' "$1" | _ar_clean plain | LC_ALL=C awk -F'\t' '
-    { kind[NR] = $1; txt[NR] = substr($0, 3) }
+  printf '%s\n' "$1" | _ar_clean | LC_ALL=C awk -F'\t' '
+    { kind[NR] = $1; txt[NR] = $2 }
     END {
       bot = 0
       for (i = NR; i >= 1; i--) if (kind[i] == "R") { bot = i; break }
@@ -147,15 +163,12 @@ ar_claude_background() {
       out = ""; sub_n = 0
       for (i = bot + 1; i <= NR; i++) {
         t = txt[i]
-        p = index(t, "\302\267")
-        if (p > 0) {
-          rest = substr(t, p + 2)
-          while (match(rest, re)) {
-            m = substr(rest, RSTART, RLENGTH)
-            sub(/[^a-z]$/, "", m)
-            out = out (out == "" ? "" : ", ") m
-            rest = substr(rest, RSTART + RLENGTH)
-          }
+        rest = t
+        while (match(rest, re)) {
+          m = substr(rest, RSTART, RLENGTH)
+          sub(/[^a-z]$/, "", m)
+          out = out (out == "" ? "" : ", ") m
+          rest = substr(rest, RSTART + RLENGTH)
         }
         s = t; sub(/^[ \t]+/, "", s)
         if (substr(s, 1, 3) == "\342\227\257") sub_n++
@@ -199,29 +212,45 @@ ar_has_teammates() {
   return $found
 }
 
-# _ar_claude_state <sock> <pane> <pid> <argv_file> -> teammate|prompt|busy|busy:<what>|unsent|idle
+# _ar_claude_state <sock> <pane> <pid> <argv_file> -> see ar_state.
 _ar_claude_state() {
   local sock="$1" pane="$2" pid="$3" argv_file="$4" row status waiting screen bg
   if ar_is_teammate "$argv_file"; then echo teammate; return; fi
   row=$(_ar_claude_row "$pid")
   if [[ -z "$row" ]]; then
-    # No status from `claude agents --json`: cannot rule out a prompt or a turn.
-    echo "busy:status unknown"; return
+    # Listing worked but this pid is not in it, or the listing itself failed.
+    if [[ "${AR_CLAUDE_OK:-0}" == 1 ]]; then echo unlisted; else echo "busy:status unavailable"; fi
+    return
   fi
   status=$(echo "$row" | cut -f2); waiting=$(echo "$row" | cut -f3)
   if [[ "$status" == waiting || "$waiting" != "-" ]]; then echo prompt; return; fi
-  if [[ "$status" == busy ]]; then echo busy; return; fi
+  case "$status" in
+    busy) echo busy; return ;;
+    idle) ;;
+    -) echo "busy:status unknown"; return ;;
+    *) echo "busy:$status"; return ;;
+  esac
   screen=$(ar_screen "$sock" "$pane")
   bg=$(ar_claude_background "$screen")
   if [[ -n "$bg" ]]; then echo "busy:$bg"; return; fi
   if ar_has_teammates "$sock" "$pane" "$pid"; then echo "busy:teammates"; return; fi
+  # idle only when the input box is positively identified and empty.
+  if ! ar_input_box_ok "$screen"; then echo unrecognized; return; fi
   if [[ -n "$(ar_input_text "$screen")" ]]; then echo unsent; return; fi
   echo idle
 }
 
 # ---- Dispatch ----------------------------------------------------------------
 
-# ar_state <type> <sock> <pane> <pid> <argv_file>
+# ar_state <type> <sock> <pane> <pid> <argv_file> -> one of:
+#   teammate      teammate process (skip)
+#   prompt        waiting on a permission/question prompt (skip)
+#   busy          working
+#   busy:<what>   background work, live teammates, unknown/unavailable status (wait)
+#   unsent        unsent text in the input box (skip)
+#   unrecognized  json says idle but the input box was not positively identified (skip)
+#   unlisted      not in a successful `claude agents --json` listing (cannot restart)
+#   idle          safe to restart
 ar_state() {
   local type="$1"; shift
   case "$type" in

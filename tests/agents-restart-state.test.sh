@@ -27,7 +27,16 @@ expect_eq "truecolor 38;2;2;2;2 is not dim" "rgb" "$(ar_input_text "$(box "❯ $
 expect_eq "OSC and other CSI stripped" "hi" "$(ar_input_text "$(box "❯ ${E}]8;;http://x${E}\\${E}[?25h${E}[1Khi" "$FOOT")")"
 expect_eq "multi-line draft" "line one line two" "$(ar_input_text "$(printf '%s\n❯ line one\n  line two\n%s\n%s\n' "$RULE" "$RULE" "$FOOT")")"
 expect_eq "old output above box ignored" "" "$(ar_input_text "$(printf '❯ old prompt\n%s\n%s\n%s\n%s\n%s\n' "$RULE" '❯ ' "$RULE" "$FOOT" "")")"
-expect_eq "no box: last prompt line" "abc" "$(ar_input_text "❯ abc")"
+expect_eq "no box: no text" "" "$(ar_input_text "❯ abc")"
+expect "no box is not ok" 1 "" ar_input_box_ok "❯ abc"
+expect "box is ok" 0 "" ar_input_box_ok "$(box '❯ ' "$FOOT")"
+expect "bash mode box (no prompt glyph) is not ok" 1 "" ar_input_box_ok "$(box '! rm -rf x' "$FOOT")"
+expect "one rule only is not ok" 1 "" ar_input_box_ok "$(printf '%s\n❯ \n%s\n' "$RULE" "$FOOT")"
+DIALOG=$(printf 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n')
+expect "dialog is not an input box" 1 "" ar_input_box_ok "$DIALOG"
+expect_eq "dim rules still identify box" "hi" "$(ar_input_text "$(box "❯ hi" "$FOOT" | sed "s/^─/${E}[2m─/; s/─\$/─${E}[0m/")")"
+expect_eq "other non-dim line in box counts as text" "note hi" "$(ar_input_text "$(printf '%s\n  note\n❯ hi\n%s\n%s\n' "$RULE" "$RULE" "$FOOT")")"
+expect_eq "background noun without dot" "1 shell" "$(ar_claude_background "$(box '❯ ' "  1 shell running")")"
 
 # --- ar_claude_background ---
 expect_eq "no background" "" "$(ar_claude_background "$(box '❯ ' "$FOOT")")"
@@ -87,13 +96,29 @@ expect_eq "session id unknown pid" "-" "$(ar_session_id claude 999999 /x)"
 FAKE_AGENTS_FAIL=1 ar_claude_refresh
 expect_eq "refresh failure leaves empty" "" "$AR_CLAUDE_TSV"
 expect_eq "session id after failure" "-" "$(ar_session_id claude "$P0" /x)"
-expect_eq "state after failure is not idle" "busy:status unknown" "$(FAKE_AGENTS_FAIL=1 ar_claude_refresh; st "$R0")"
+expect_eq "AR_CLAUDE_OK 0 after failure" 0 "$AR_CLAUDE_OK"
+expect_eq "state after failure" "busy:status unavailable" "$(FAKE_AGENTS_FAIL=1 ar_claude_refresh; st "$R0")"
+ar_claude_refresh
+expect_eq "AR_CLAUDE_OK 1 after success" 1 "$AR_CLAUDE_OK"
+AR_CLAUDE_TSV=$(echo "$AR_CLAUDE_TSV" | grep -v "^$P0	")
+expect_eq "pid missing from good listing" unlisted "$(st "$R0")"
+ar_claude_refresh
 
 # idle with placeholder (the fake's default screen is a bare prompt; draw the placeholder)
 setscreen "$P0" "$(box "$ph" "$FOOT")"
 t_wait 5 screen_has "$R0" "Try" || echo "screen not drawn"
 ar_claude_refresh
 expect_eq "idle with placeholder" idle "$(st "$R0")"
+
+# dialog / missing box with json idle must not be idle
+setscreen "$P0" "$DIALOG"
+t_wait 5 screen_has "$R0" "Do you want"
+expect_eq "dialog with json idle" unrecognized "$(st "$R0")"
+setscreen "$P0" "$(printf '%s\n! rm -rf x\n%s\n%s\n' "$RULE" "$RULE" "$FOOT")"
+t_wait 5 screen_has "$R0" "rm -rf"
+expect_eq "bash-mode box with json idle" unrecognized "$(st "$R0")"
+setscreen "$P0" "$(box "$ph" "$FOOT")"
+t_wait 5 screen_has "$R0" "Try"
 
 # unsent
 setscreen "$P0" "$(box '❯ fix the tests' "$FOOT")"
@@ -118,6 +143,13 @@ t_agent_set "$P0" '{"status":"waiting"}'; ar_claude_refresh
 expect_eq "status waiting prompt" prompt "$(st "$R0")"
 t_agent_set "$P0" '{"status":"waiting","waitingFor":"approve"}'; ar_claude_refresh
 expect_eq "waiting row waitingFor" "$P0	waiting	approve	fake-$P0" "$(echo "$AR_CLAUDE_TSV" | grep "^$P0	")"
+t_agent_set "$P0" '{"status":"compacting"}'; ar_claude_refresh
+expect_eq "unknown status is busy" "busy:compacting" "$(st "$R0")"
+t_agent_set "$P0" '{"status":null}'; ar_claude_refresh
+expect_eq "null status" "busy:status unknown" "$(st "$R0")"
+t_agent_set "$P0" '{"status":5,"sessionId":7}'; ar_claude_refresh
+expect_eq "non-string fields tolerated" "busy:5" "$(st "$R0")"
+expect_eq "other rows survive odd entry" 1 "$(echo "$AR_CLAUDE_TSV" | grep -c "^$P2	")"
 t_agent_set "$P0" '{"status":"idle"}'
 
 # teammate pane and a lead in the same window
