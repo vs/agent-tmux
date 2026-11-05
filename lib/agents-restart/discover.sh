@@ -23,11 +23,9 @@ ar_ps_snapshot() {
   ps -A -o pid=,ppid=,args= > "$AR_PS_FILE" 2>/dev/null </dev/null || true
 }
 
-# ar_agent_in_pane <pane_pid> -> "pid<TAB>type" of the topmost agent descendant.
-ar_agent_in_pane() {
-  local root="$1"
-  [[ -n "${AR_PS_FILE:-}" && -s "$AR_PS_FILE" ]] || ar_ps_snapshot
-  awk -v root="$root" '
+# awk functions shared by the process-table readers: agent(args) -> the agent
+# type an argv line runs ("" when none); base(path) -> last path component.
+_AR_AWK_AGENT='
     function base(p,   n, a) { n = split(p, a, "/"); return a[n] }
     function agent(args,   n, a, b0, b1) {
       n = split(args, a, /[ \t]+/)
@@ -39,12 +37,19 @@ ar_agent_in_pane() {
       }
       return ""
     }
-    {
+    function read_ps(   line) {
       pid = $1; ppid = $2
       line = $0; sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]*/, "", line)
-      args[pid] = line
+      args[pid] = line; parent[pid] = ppid
       kids[ppid] = kids[ppid] " " pid
-    }
+    }'
+
+# ar_agent_in_pane <pane_pid> -> "pid<TAB>type" of the topmost agent descendant.
+ar_agent_in_pane() {
+  local root="$1"
+  [[ -n "${AR_PS_FILE:-}" && -s "$AR_PS_FILE" ]] || ar_ps_snapshot
+  awk -v root="$root" "$_AR_AWK_AGENT"'
+    { read_ps() }
     END {
       head = 1; tail = 1; queue[1] = root
       while (head <= tail) {
@@ -157,15 +162,26 @@ _ar_find_pkg() {
   return 0
 }
 
-# _ar_modified_since_start <pid> <file> -> 0 when file is newer than the process.
-_ar_modified_since_start() {
-  local mt ls st
-  [[ -e "$2" ]] || return 1
-  mt=$(stat -f %m "$2" 2>/dev/null || stat -c %Y "$2" 2>/dev/null) || return 1
+# _ar_start_epoch <pid> -> the process start time in epoch seconds; 1 if unknown.
+_ar_start_epoch() {
+  local ls
   ls=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null </dev/null) || return 1
   ls=$(echo $ls)
   [[ -n "$ls" ]] || return 1
-  st=$(LC_ALL=C date -j -f "%a %b %e %T %Y" "$ls" +%s 2>/dev/null) || return 1
+  LC_ALL=C date -j -f "%a %b %e %T %Y" "$ls" +%s 2>/dev/null
+}
+
+# _ar_mtime <file> -> modification time in epoch seconds; 1 if unknown.
+_ar_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+# _ar_modified_since_start <pid> <file> -> 0 when file is newer than the process.
+_ar_modified_since_start() {
+  local mt st
+  [[ -e "$2" ]] || return 1
+  mt=$(_ar_mtime "$2") || return 1
+  st=$(_ar_start_epoch "$1") || return 1
   [[ "$mt" -gt "$st" ]]
 }
 

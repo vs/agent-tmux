@@ -1,0 +1,24 @@
+
+[48;5;8m
+[1;2m› [0m[48;5;8mrun: touch b.txt
+
+[49m
+[2m• [0mAttempting to create the file.
+
+[1m[38;2;128;128;128m•[0m [1mRunning[0m [38;2;137;180;250mtouch[38;2;205;214;244m b.txt[39m
+
+
+  [1mWould you like to run the following command?[0m
+
+  Environment: [1mlocal[0m
+
+  Reason: [3mDo you want to allow creating b.txt outside the read-only sandbox?[0m
+
+  $ [38;2;137;180;250mtouch[38;2;205;214;244m b.txt[39m
+
+
+[1;7m› 1. Yes, proceed (y)
+[0m  2. Yes, and don't ask again for commands that start with `touch b.txt` ([1mp[0m)
+  3. No, and tell Codex what to do differently ([1mesc[0m)
+
+  [2mPress [0;1menter[0;2m to confirm or [0;1mesc[0;2m to cancel
