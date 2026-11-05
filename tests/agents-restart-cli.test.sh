@@ -41,6 +41,6 @@ pid=$(jq -r '.[0].pid' < <(claude agents --json))
 t_agent_set "$pid" '{"status":"busy"}'
 expect "fake override" 0 '"status":"busy"' claude agents --json
 t_tmux send-keys -t s1 "/exit" Enter
-t_wait 5 test "$(claude agents --json)" = '[]'
+t_wait 5 bash -c '[ "$(claude agents --json)" = "[]" ]'
 expect_eq "fake exits and unlists" "[]" "$(claude agents --json)"
 t_done

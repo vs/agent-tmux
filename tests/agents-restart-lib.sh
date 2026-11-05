@@ -69,7 +69,8 @@ done
 pid=$$
 if [[ "$tool" == claude ]]; then
   jq -nc --argjson pid "$pid" --arg cwd "$PWD" --arg sid "${sid:-fake-$pid}" \
-    '{pid: $pid, cwd: $cwd, status: "idle", sessionId: $sid}' > "$work/agents/$pid"
+    '{pid: $pid, cwd: $cwd, status: "idle", sessionId: $sid}' > "$work/agents/.$pid.tmp"
+  mv "$work/agents/.$pid.tmp" "$work/agents/$pid"
 fi
 
 screen="$work/screen/$pid"
@@ -119,5 +120,5 @@ t_use_version() {
 
 # t_agent_set <pid> <json-object>: override fields in the fake's agents --json entry.
 t_agent_set() {
-  echo "$2" > "$WORK/agents/$1.json"
+  echo "$2" > "$WORK/agents/.$1.tmp" && mv "$WORK/agents/.$1.tmp" "$WORK/agents/$1.json"
 }
