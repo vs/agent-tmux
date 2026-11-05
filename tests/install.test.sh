@@ -17,6 +17,7 @@ rules() { jq --arg r "$1" '[.permissions.allow[] | select(. == $r)] | length' "$
 expect "install runs" 0 "done." run_install
 expect_eq "tmux-bridge linked" "$T_REPO/bin/tmux-bridge" "$(readlink "$H/.local/bin/tmux-bridge")"
 expect_eq "swarm linked" "$T_REPO/bin/swarm" "$(readlink "$H/.local/bin/swarm")"
+expect_eq "agents-restart linked" "$T_REPO/bin/agents-restart" "$(readlink "$H/.local/bin/agents-restart")"
 expect_eq "config created" "1" "$( [ -f "$H/.agent-tmux/swarm.conf" ] && echo 1)"
 expect_eq "config is the example" "1" "$(cmp -s "$T_REPO/config/swarm.conf.example" "$H/.agent-tmux/swarm.conf" && echo 1)"
 expect_eq "example sets root" "1" "$(grep -c '^root ~/workspace$' "$H/.agent-tmux/swarm.conf")"

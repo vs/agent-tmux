@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Print a process's exact argv, NUL-separated (macOS, KERN_PROCARGS2).
+
+Exit 1 if the process is gone or unreadable. Stdlib only.
+"""
+import ctypes
+import ctypes.util
+import struct
+import sys
+
+CTL_KERN = 1
+KERN_PROCARGS2 = 49
+
+
+def procargs2(pid):
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    mib = (ctypes.c_int * 3)(CTL_KERN, KERN_PROCARGS2, pid)
+    size = ctypes.c_size_t(0)
+    if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0:
+        return None
+    buf = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+        return None
+    return buf.raw[: size.value]
+
+
+def argv_of(raw):
+    argc = struct.unpack_from("i", raw, 0)[0]
+    i = 4
+    while i < len(raw) and raw[i] != 0:  # exec path
+        i += 1
+    while i < len(raw) and raw[i] == 0:  # NUL padding
+        i += 1
+    args = []
+    for _ in range(argc):
+        j = raw.find(b"\0", i)
+        if j < 0:
+            j = len(raw)
+        args.append(raw[i:j])
+        i = j + 1
+    return args
+
+
+def main():
+    if len(sys.argv) != 2 or not sys.argv[1].isdigit():
+        sys.stderr.write("usage: agents-restart-argv <pid>\n")
+        return 2
+    raw = procargs2(int(sys.argv[1]))
+    if not raw or len(raw) < 4:
+        return 1
+    out = sys.stdout.buffer
+    for a in argv_of(raw):
+        out.write(a + b"\0")
+    out.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

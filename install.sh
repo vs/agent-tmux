@@ -43,6 +43,7 @@ link() {
 
 link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
 link "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
+link "$REPO/bin/agents-restart" "$HOME/.local/bin/agents-restart"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
 
 # Earlier versions linked the skills into ~/.claude/skills; with the plugin

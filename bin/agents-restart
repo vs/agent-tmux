@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# agents-restart — restart upgraded Claude/Codex/Gemini agents in their tmux panes.
+set -euo pipefail
+
+for _d in /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$_d:"*) ;; *) PATH="$PATH:$_d" ;; esac
+done
+export PATH
+unset _d
+
+# Resolve symlinks (macOS has no readlink -f) to find the repo root.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+  _dir=$(cd "$(dirname "$_src")" && pwd)
+  _src=$(readlink "$_src")
+  [[ "$_src" == /* ]] || _src="$_dir/$_src"
+done
+AR_ROOT=$(cd "$(dirname "$_src")/.." && pwd)
+unset _src _dir
+
+for _f in "$AR_ROOT"/lib/agents-restart/*.sh; do
+  # shellcheck disable=SC1090
+  source "$_f"
+done
+unset _f
+
+ar_usage() {
+  echo "usage: agents-restart [-y] [--dry-run] [-h|--help]"
+}
+
+# Task 7 defines the real ar_main in lib/agents-restart/main.sh.
+if ! declare -F ar_main >/dev/null; then
+  ar_main() { return 0; }
+fi
+
+AR_YES=0
+AR_DRY_RUN=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y) AR_YES=1 ;;
+    --dry-run) AR_DRY_RUN=1 ;;
+    -h|--help) ar_usage; exit 0 ;;
+    *) ar_usage >&2; exit 2 ;;
+  esac
+  shift
+done
+export AR_YES AR_DRY_RUN
+
+ar_main
