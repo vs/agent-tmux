@@ -75,7 +75,7 @@ _ar_realpath() {
 
 # _ar_lsof_field <pid> <fd> -> first path reported for that fd ("txt" or "cwd").
 _ar_lsof_field() {
-  lsof -p "$1" -a -d "$2" -Fn 2>/dev/null </dev/null | sed -n 's/^n//p' | head -1
+  { lsof -p "$1" -a -d "$2" -Fn 2>/dev/null </dev/null | sed -n 's/^n//p' | head -1; } || true
 }
 
 # ar_running_path <pid> -> realpath of the running program (may be deleted).
@@ -104,14 +104,69 @@ ar_running_path() {
   [[ -n "$p" ]] && _ar_realpath "$p" || true
 }
 
-# ar_version_from_path <path> -> last x.y.z path-component match, or empty.
+# ar_version_from_path <path> -> last x.y.z path component belonging to an agent
+# install, or empty. A component counts when its parent directory name contains
+# claude/codex/gemini (case-insensitive), or the parent is "versions" and the
+# grandparent does. This keeps Node's own version out of npm-installed agents.
 ar_version_from_path() {
-  local IFS=/ c v=""
+  local IFS=/ c v="" i=0 parent="" grand="" lp lg
+  local re='[0-9]+\.[0-9]+\.[0-9]+'
   # shellcheck disable=SC2086
   for c in $1; do
-    if [[ "$c" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then v="${BASH_REMATCH[0]}"; fi
+    if [[ -n "$c" && "$c" =~ $re ]]; then
+      lp=$(printf '%s' "$parent" | tr 'A-Z' 'a-z')
+      lg=$(printf '%s' "$grand" | tr 'A-Z' 'a-z')
+      if [[ "$lp" == *claude* || "$lp" == *codex* || "$lp" == *gemini* ||
+            ( "$lp" == versions && ( "$lg" == *claude* || "$lg" == *codex* || "$lg" == *gemini* ) ) ]]; then
+        v="${BASH_REMATCH[0]}"
+      fi
+    fi
+    grand="$parent"; parent="$c"
+    i=$((i + 1))
   done
   echo "$v"
+}
+
+# _ar_is_interpreted <pid> -> 0 when argv0 is an interpreter running a script.
+_ar_is_interpreted() {
+  local args b0
+  [[ -n "${AR_PS_FILE:-}" && -s "$AR_PS_FILE" ]] || ar_ps_snapshot
+  args=$(awk -v p="$1" '$1 == p { sub(/^[ \t]*[0-9]+[ \t]+[0-9]+[ \t]*/, ""); print; exit }' "$AR_PS_FILE")
+  # shellcheck disable=SC2086
+  set -- $args
+  b0="${1:-}"; b0="${b0##*/}"; b0="${b0#-}"
+  case "$b0" in
+    node|bash|sh|python*) [[ -n "${2:-}" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# _ar_find_pkg <script path> -> nearest enclosing package.json of a known agent.
+_ar_find_pkg() {
+  local d name
+  d=$(dirname "$1")
+  while [[ -n "$d" && "$d" != / && "$d" != . ]]; do
+    if [[ -f "$d/package.json" ]]; then
+      name=$(jq -r '.name // empty' "$d/package.json" 2>/dev/null || true)
+      case "$name" in
+        @anthropic-ai/claude-code|@openai/codex|@google/gemini-cli) echo "$d/package.json"; return 0 ;;
+      esac
+    fi
+    d=$(dirname "$d")
+  done
+  return 0
+}
+
+# _ar_modified_since_start <pid> <file> -> 0 when file is newer than the process.
+_ar_modified_since_start() {
+  local mt ls st
+  [[ -e "$2" ]] || return 1
+  mt=$(stat -f %m "$2" 2>/dev/null || stat -c %Y "$2" 2>/dev/null) || return 1
+  ls=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null </dev/null) || return 1
+  ls=$(echo $ls)
+  [[ -n "$ls" ]] || return 1
+  st=$(LC_ALL=C date -j -f "%a %b %e %T %Y" "$ls" +%s 2>/dev/null) || return 1
+  [[ "$mt" -gt "$st" ]]
 }
 
 # _ar_semver <text> -> first x.y.z in text, or empty.
@@ -119,23 +174,38 @@ _ar_semver() {
   if [[ "$1" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then echo "${BASH_REMATCH[0]}"; fi
 }
 
-# ar_running_version <pid> -> version of the running program, or empty.
+# ar_running_version <pid> -> version of the running program, or empty (unknown).
+# Unknown also when the program file changed after the process started (in-place
+# upgrade: the file no longer describes what is running).
 ar_running_version() {
-  local path v out
-  path=$(ar_running_path "$1")
+  local pid="$1" path file v out pj interp=0
+  path=$(ar_running_path "$pid")
   [[ -n "$path" ]] || return 0
+  _ar_is_interpreted "$pid" && interp=1
+  file="$path"
   v=$(ar_version_from_path "$path")
-  if [[ -z "$v" && -f "$path" && -x "$path" ]]; then
-    out=$("$path" --version 2>/dev/null </dev/null | head -1 || true)
-    v=$(_ar_semver "$out")
+  if [[ -z "$v" ]]; then
+    if [[ $interp == 1 ]]; then
+      pj=$(_ar_find_pkg "$path")
+      if [[ -n "$pj" ]]; then
+        v=$(_ar_semver "$(jq -r '.version // empty' "$pj" 2>/dev/null || true)")
+        file="$pj"
+      fi
+    elif [[ -f "$path" && -x "$path" ]]; then
+      out=$("$path" --version 2>/dev/null </dev/null | head -1 || true)
+      v=$(_ar_semver "$out")
+    fi
   fi
+  [[ -n "$v" ]] || return 0
+  if _ar_modified_since_start "$pid" "$file"; then return 0; fi
   echo "$v"
 }
 
 # ar_installed_version <type> -> semver of `<type> --version` on PATH; cached per
 # type (the cache only persists when called outside $(...)).
 ar_installed_version() {
-  local type="$1" var="_AR_IV_$1" out v
+  local type="$1" var out v
+  var="_AR_IV_$(printf '%s' "$1" | tr -c 'A-Za-z0-9\n' '_')"
   if eval "[[ -n \${$var+x} ]]"; then
     echo "${!var}"
     return
@@ -172,7 +242,7 @@ ar_discover() {
     acwd=$(_ar_lsof_field "$pid" cwd); acwd="${acwd:--}"
     if [[ "$acwd" == "-" ]]; then folder="-"; else folder=$(basename "$acwd"); fi
     scwd=$(_ar_lsof_field "$ppid" cwd)
-    [[ -n "$scwd" ]] && shell_cwd="$scwd"
+    if [[ -n "$scwd" ]]; then shell_cwd="$scwd"; fi
 
     argv_file="$workdir/$pane.argv"
     rc=0; ar_argv "$pid" "$argv_file" || rc=$?
