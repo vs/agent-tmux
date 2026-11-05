@@ -7,6 +7,7 @@ cd "$T_REPO"
 source lib/agents-restart/common.sh
 source lib/agents-restart/discover.sh
 source lib/agents-restart/state.sh
+source lib/agents-restart/sessions.sh
 
 E=$'\033'
 RULE=$(printf '─%.0s' $(seq 1 40))
