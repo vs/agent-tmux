@@ -215,7 +215,7 @@ _ar_start_rows() {
       self)
         _ar_finish "$j" skip "this pane, skipped"
         cmd=""
-        if [[ "${A_SID[j]}" != - ]]; then
+        if [[ "${A_SID[j]}" != - && "${A_EXACT[j]}" == 1 ]]; then
           cmd=$(ar_resume_cmd "${A_TYPE[j]}" "${A_ARGF[j]}" "${A_SID[j]}" "${A_ACWD[j]}" \
             "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" 2>/dev/null) || cmd=""
         fi

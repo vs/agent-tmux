@@ -211,6 +211,7 @@ OUT=$(NO_COLOR=1 TMUX="$sp,1,0" TMUX_PANE="$mepane" agents-restart -y 2>"$WORK/e
 expect_eq "self: exit 0" 0 "$CODE"
 has "self: plan line" "^  [^ ]+ +me +claude +this pane, skipped"
 has "self: other restarted" "^✓ .*other +claude +resumed"
+has "self: own resume command listed" "^  +[^ ]+ +claude --resume fake-$PM   \(this pane: quit it first\)$"
 expect_eq "self: own agent alive" 0 "$(alive "$PM"; echo $?)"
 expect_eq "self: own agent not quit" 0 "$(quits | grep -c "^$PM"$'\t' || true)"
 
