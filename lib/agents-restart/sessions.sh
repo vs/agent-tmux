@@ -56,7 +56,7 @@ _ar_peers() {
 _ar_files_since() {
   local start="$1" dir="$2" name="$3" ref stamp
   stamp=$(date -r $((start - 1)) +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$((start - 1))" +%Y%m%d%H%M.%S) || return 1
-  ref=$(mktemp "${TMPDIR:-/tmp}/agents-restart-since.XXXXXX") || return 1
+  ref=$(mktemp "${AR_WD:-${TMPDIR:-/tmp}}/agents-restart-since.XXXXXX") || return 1
   if ! touch -t "$stamp" "$ref" 2>/dev/null; then rm -f "$ref"; return 1; fi
   find "$dir" -type f -name "$name" -newer "$ref" 2>/dev/null || true
   rm -f "$ref"
@@ -83,7 +83,7 @@ _ar_pick_session() {
 # (argv0, or argv1 for an interpreter), one per line; empty when unreadable.
 _ar_argv_after_program() {
   local tmp a seen=0 b rc=0
-  tmp=$(mktemp "${TMPDIR:-/tmp}/agents-restart-argv.XXXXXX")
+  tmp=$(mktemp "${AR_WD:-${TMPDIR:-/tmp}}/agents-restart-argv.XXXXXX")
   ar_argv "$1" "$tmp" || rc=$?
   if [[ $rc == 0 || $rc == 2 ]]; then
     while IFS= read -r -d '' a; do

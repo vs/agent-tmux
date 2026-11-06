@@ -198,7 +198,7 @@ ar_has_teammates() {
   win=$(ar_tmux "$sock" display-message -p -t "$pane" '#{window_id}' 2>/dev/null </dev/null) || return 1
   [[ -n "$win" ]] || return 1
   ar_ps_snapshot
-  tmp=$(mktemp "${TMPDIR:-/tmp}/agents-restart-tm.XXXXXX")
+  tmp=$(mktemp "${AR_WD:-${TMPDIR:-/tmp}}/agents-restart-tm.XXXXXX")
   while IFS= read -r pid2; do
     [[ -n "$pid2" ]] || continue
     hit=$(ar_agent_in_pane "$pid2")

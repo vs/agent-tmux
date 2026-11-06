@@ -10,7 +10,8 @@
 
 _AR_SPIN=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 
-# Nothing on the render path runs in $(...) except the clock read: a Ctrl+C
+# Nothing on the render path runs in $(...) except the clock read (at most
+# once a second, see _ar_ui_tick): a Ctrl+C
 # kills such subshells (they don't inherit the INT trap), so the helpers below
 # return their result in a variable (_AR_V, _AR_LINE, AR_NOW) instead.
 
@@ -49,6 +50,7 @@ ar_ui_init() {
   : "${AR_UI_W_ADDR:=6}" "${AR_UI_W_FOLDER:=8}" "${AR_UI_W_VER:=16}" "${AR_UI_W_STATE:=6}"
   AR_UI_W_TEXT=30
   AR_NOW="$(date +%s)000"
+  _AR_FRAME=0
   ar_ui_clock
 }
 
@@ -57,12 +59,23 @@ _ar_now_ms() {
   perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000' 2>/dev/null || echo "$(date +%s)000"
 }
 
-# ar_ui_clock: AR_NOW = now in ms; keeps the last value when the read is cut short.
+# ar_ui_clock: AR_NOW = now in ms; keeps the last value when the read is cut
+# short. It spawns a process, so it runs at events (a restart starting or
+# ending, the summary) and, through _ar_ui_tick, at most once a second.
 ar_ui_clock() {
   local t
   t=$(_ar_now_ms) || t=""
   if [[ "$t" =~ ^[0-9]+$ ]]; then AR_NOW=$t; fi
+  _AR_CLK_S=$SECONDS
   return 0
+}
+
+# _ar_ui_tick: once per frame: advance the spinner, and read the clock only
+# when $SECONDS has moved on since the last read, so live elapsed times
+# update once a second.
+_ar_ui_tick() {
+  _AR_FRAME=$(((${_AR_FRAME:-0} + 1) % 10))
+  [[ "$SECONDS" == "${_AR_CLK_S:-}" ]] || ar_ui_clock
 }
 
 # _ar_dur_v <ms>: _AR_V = "2.1s", "1m12s" or "1h05m".
@@ -225,8 +238,8 @@ ar_ui_render() {
     AR_UI_DONE[i]=2
   done
   if [[ $AR_FANCY == 1 ]]; then
-    ar_ui_clock
-    frame=${_AR_SPIN[$(((AR_NOW / 100) % 10))]}
+    _ar_ui_tick
+    frame=${_AR_SPIN[_AR_FRAME]}
     for ((i = 0; i < AR_UI_N; i++)); do
       [[ ${AR_UI_DONE[i]} == 0 && "${AR_UI_MARK[i]}" == spin ]] || continue
       _ar_dur_v $((AR_NOW - ${AR_UI_T0[i]:-$AR_NOW}))
