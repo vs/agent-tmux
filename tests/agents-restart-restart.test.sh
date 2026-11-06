@@ -85,6 +85,18 @@ sleep 1
 expect_eq "unsent: agent alive" 0 "$(alive "$(fld "$R1" 6)"; echo $?)"
 expect_eq "unsent: nothing started" "$before" "$(loglines)"
 
+# the session changed since the caller read it: nothing sent
+P1=$(fld "$R1" 6)
+setscreen "$P1" "$IDLE"
+t_agent_set "$P1" '{"sessionId":"switched-session"}'
+sleep 1
+out=$(ar_restart_one "$R1" "fake-$P1" 2>"$WORK/m1.err")
+expect_eq "stale sid: state changed" $'fail\tstate changed\t-' "$out"
+expect_eq "stale sid: says why" 1 "$(grep -c "now runs session switched-session" "$WORK/m1.err")"
+sleep 1
+expect_eq "stale sid: agent alive" 0 "$(alive "$P1"; echo $?)"
+expect_eq "stale sid: nothing started" "$before" "$(loglines)"
+
 # hung agent: quit ignored
 P2=$(fld "$R2" 6)
 t_tmux send-keys -t s1:2 "HANG" Enter
@@ -171,5 +183,20 @@ out=$(ar_restart_one "$RC" "019a1adf-8398-72b1-b333-af3dfa74fe00")
 expect_eq "codex: result" $'ok\t-' "$out"
 expect_eq "codex: old agent gone" 1 "$(alive "$CP"; echo $?)"
 expect_eq "codex: resumed with 0.167.0" 1 "$(grep -c "^resume"$'\x1f'"019a1adf-8398-72b1-b333-af3dfa74fe00"$'\t0.167.0$' "$FAKE_AGENT_LOG")"
+
+# codex resume that starts, then exits after 1 s: not "resumed"
+cnew() { ar_discover "$WORK/dc2" | awk -F'\t' -v p="$CP" '$3 == "s2:0.0" && $6 != p' | grep -q .; }
+mkdir -p "$WORK/dc2"; t_wait 15 cnew
+RC2=$(ar_discover "$WORK/dc2" | awk -F'\t' '$3 == "s2:0.0"')
+CP=$(fld "$RC2" 6)
+setscreen "$CP" "$(cat "$T_REPO/tests/fixtures/agents-restart/codex-idle.screen")"
+t_wait 15 cidle
+mkdir -p "$WORK/installs/codex/0.168.0"
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo 0.168.0; exit 0; }\nsleep 1\nexit 0\n' > "$WORK/installs/codex/0.168.0/codex"
+chmod +x "$WORK/installs/codex/0.168.0/codex"
+t_use_version codex 0.168.0
+out=$(AGENTS_RESTART_START_TIMEOUT=3 ar_restart_one "$RC2" "019a1adf-8398-72b1-b333-af3dfa74fe00")
+expect_eq "codex exits after 1 s: didn't come back" $'fail\tdidn\'t come back\tcodex resume 019a1adf-8398-72b1-b333-af3dfa74fe00' "$out"
+expect_eq "settle secs: junk -> default" 3 "$(_ar_pos_int x 3)"
 
 t_done

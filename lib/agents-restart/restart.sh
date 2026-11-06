@@ -96,10 +96,11 @@ ar_restart_one() {
   local record="$1" sid="${2:--}"
   local sock pane addr folder type pid rv iv acwd scwd argf parent exact
   IFS=$'\t' read -r sock pane addr folder type pid rv iv acwd scwd argf parent exact <<<"$record"
-  local etmo stmo cmd ppid tpg st old_trap rc deadline hit npid row nsid
+  local etmo stmo settle cmd ppid tpg st old_trap rc deadline hit npid row nsid now seen="" seen_at=0
 
   etmo=$(_ar_pos_int "${AGENTS_RESTART_EXIT_TIMEOUT:-}" 15)
   stmo=$(_ar_pos_int "${AGENTS_RESTART_START_TIMEOUT:-}" 20)
+  settle=$(_ar_pos_int "${AGENTS_RESTART_SETTLE_SECS:-}" 3)
 
   # 1. precheck: everything is verified before any key is sent
   if [[ -z "$sid" || "$sid" == - ]]; then _ar_fail "no session id"; return 0; fi
@@ -126,7 +127,16 @@ ar_restart_one() {
     echo "agents-restart: $pane has no job-control shell to return to; nothing sent" >&2
     _ar_fail "pane has no shell to return to"; return 0
   fi
-  [[ "$type" != claude ]] || ar_claude_refresh
+  if [[ "$type" == claude ]]; then
+    ar_claude_refresh
+    # the session may have changed (/resume, /clear) since the caller read sid
+    row=$(_ar_claude_row "$pid")
+    nsid=$(echo "$row" | cut -f4)
+    if [[ -n "$nsid" && "$nsid" != - && "$nsid" != "$sid" ]]; then
+      echo "agents-restart: $pane now runs session $nsid, not $sid; nothing sent" >&2
+      _ar_fail "state changed"; return 0
+    fi
+  fi
   st=$(ar_state "$type" "$sock" "$pane" "$pid" "$argf") || st=""
   if [[ "$st" != idle ]]; then
     echo "agents-restart: $pane is '$st', not idle; nothing sent" >&2
@@ -141,14 +151,30 @@ ar_restart_one() {
   if [[ -n "$old_trap" ]]; then eval "$old_trap"; else trap - INT; fi
   [[ $rc -eq 0 ]] || return 0
 
-  # 5. wait for the new agent process
+  # 5. wait for the new agent process. Codex and Gemini have no listing to
+  # confirm the session: their new process must still be running more than
+  # <settle> seconds after it was first seen (a resume that fails at once,
+  # e.g. an unknown session, exits within that time).
   deadline=$(( $(date +%s) + stmo ))
   while :; do
     ar_ps_snapshot
     hit=$(ar_agent_in_pane "$ppid")
     npid="${hit%%$'\t'*}"
+    now=$(date +%s)
     if [[ -n "$npid" && "$npid" != "$pid" ]]; then
-      if [[ "$type" != claude ]]; then printf 'ok\t-\n'; return 0; fi
+      if [[ "$type" != claude ]]; then
+        if [[ "$npid" != "$seen" ]]; then
+          seen="$npid"; seen_at=$now
+          # a process first seen before the deadline gets its full settle time
+          [[ $now -ge $deadline ]] || deadline=$(( deadline > now + settle + 1 ? deadline : now + settle + 1 ))
+        elif [[ $((now - seen_at)) -gt $settle ]] && ! _ar_pid_gone "$npid"; then
+          printf 'ok\t-\n'; return 0
+        fi
+      fi
+    else
+      seen=""
+    fi
+    if [[ -n "$npid" && "$npid" != "$pid" && "$type" == claude ]]; then
       ar_claude_refresh
       row=$(_ar_claude_row "$npid")
       if [[ -n "$row" ]]; then
@@ -156,7 +182,7 @@ ar_restart_one() {
         printf 'ok\t%s\n' "${nsid:--}"; return 0
       fi
     fi
-    [[ $(date +%s) -lt $deadline ]] || break
+    [[ $now -lt $deadline ]] || break
     sleep 0.2
   done
   _ar_fail "didn't come back" "$cmd"
