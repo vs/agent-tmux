@@ -290,4 +290,82 @@ expect_eq "fancy: no spinner left behind" 0 "$(printf '%s\n' "$screen" | grep -c
 expect_eq "fancy: summary once" 1 "$(printf '%s\n' "$screen" | grep -c '^agents-restart ✓ 2 restarted · 0 skipped · 0 failed' || true)"
 expect_eq "fancy: colored marks" 1 "$(t_tmux capture-pane -e -p -t ui | grep -c $'\x1b\\[32m✓' | awk '{ print ($1 >= 1) }')"
 
+
+# ---- fancy mode, forced (test hooks): Ctrl+C storm mid-restart, line widths ----------------
+# live_width <file> [<marks>] -> widest line starting with one of marks
+# (default: spinner frames, i.e. live lines) in a fancy-mode capture, in characters.
+live_width() {
+  M="${2:-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏}" perl -CSDA -Mutf8 -ne 'chomp; s/\e\[[0-9;]*[A-Za-z]//g; my $m = $ENV{M}; utf8::decode($m);
+    for (split /\r/) { print length($_), "\n" if /^[$m]/ }' "$1" | sort -n | tail -1
+}
+strip() { perl -pe 's/\e\[[0-9;]*[A-Za-z]//g; s/\r//g' "$1"; }
+
+fresh
+PF=$(spawn flight "$OLD")
+PQ=$(spawn queued "$OLD")
+t_tmux send-keys -t flight SLOW Enter
+sleep 0.3
+t_setscreen "$PF" "$T_CLAUDE_IDLE"
+t_setscreen "$PQ" "$T_CLAUDE_IDLE"
+t_agent_set "$PQ" '{"status":"busy"}'
+sleep 0.5
+mkdir -p "$WORK/tmp"
+set -m
+TMPDIR="$WORK/tmp" AGENTS_RESTART_TEST_FANCY=1 AGENTS_RESTART_TEST_COLS=60 AGENTS_RESTART_START_TIMEOUT=5 \
+  agents-restart -y > "$WORK/fint.out" 2>&1 &
+ipid=$!
+set +m
+t_wait 30 grep -q "^$PF"$'\t' "$WORK/quits.log" || true
+n=0
+while kill -0 "$ipid" 2>/dev/null && [[ $n -lt 150 ]]; do
+  kill -INT -- -"$ipid" 2>/dev/null || true
+  sleep 0.1; n=$((n + 1))
+done
+CODE=0; wait "$ipid" 2>/dev/null || CODE=$?
+OUT=$(strip "$WORK/fint.out")
+expect_eq "fancy int storm: exit 130" 130 "$CODE"
+has "fancy int storm: summary printed" '^agents-restart ✓ 1 restarted · 1 skipped · 0 failed'
+has "fancy int storm: restarted line" "^✓ .*flight +claude +resumed"
+has "fancy int storm: queued agent marked" "^– .*queued +claude +not restarted \(interrupted\)"
+expect_eq "fancy int storm: resume command typed" 1 \
+  "$(grep -c "^--resume"$'\x1f'"fake-$PF"$'\t2.0.0$' "$FAKE_AGENT_LOG" || true)"
+expect_eq "fancy int storm: no lost-work-dir noise" 0 "$(printf '%s\n' "$OUT" | grep -cE 'mv:|No such file' || true)"
+expect_eq "fancy int storm: work dir removed" "" "$(ls "$WORK/tmp")"
+w=$(live_width "$WORK/fint.out")
+if [[ -n "$w" && "$w" -lt 60 ]]; then t_pass "fancy: live lines fit 60 columns ($w)"; else t_fail "fancy: live lines fit 60 columns" "widest: ${w:-none}"; fi
+w=$(live_width "$WORK/fint.out" ✓)
+if [[ -n "$w" && "$w" -lt 60 ]]; then t_pass "fancy: short frozen lines fit 60 columns ($w)"; else t_fail "fancy: short frozen lines fit 60 columns" "widest: ${w:-none}"; fi
+
+fresh
+LONGN=averyveryverylongsessionnamethatgoeson
+PZ=$(spawn "$LONGN" "$OLD")
+t_setscreen "$PZ" "$T_CLAUDE_IDLE"
+t_agent_set "$PZ" '{"status":"busy"}'
+sleep 0.5
+set -m
+AGENTS_RESTART_TEST_FANCY=1 AGENTS_RESTART_TEST_COLS=50 agents-restart -y > "$WORK/fw.out" 2>&1 &
+ipid=$!
+set +m
+sleep 3
+kill -INT -- -"$ipid" 2>/dev/null || true
+CODE=0; wait "$ipid" 2>/dev/null || CODE=$?
+expect_eq "narrow: exit 130" 130 "$CODE"
+w=$(live_width "$WORK/fw.out")
+if [[ -n "$w" && "$w" -lt 50 ]]; then t_pass "narrow: long names fit 50 columns ($w)"; else t_fail "narrow: long names fit 50 columns" "widest: ${w:-none}
+$(strip "$WORK/fw.out")"; fi
+
+# ---- diagnostics kept when something failed ------------------------------------------------
+fresh
+PH=$(spawn hng "$OLD")
+t_tmux send-keys -t hng HANG Enter
+sleep 0.3
+t_setscreen "$PH" "$T_CLAUDE_IDLE"
+sleep 0.5
+CODE=0
+OUT=$(NO_COLOR=1 TMPDIR="$WORK/tmp" AGENTS_RESTART_EXIT_TIMEOUT=1 agents-restart -y 2>"$WORK/err") || CODE=$?
+expect_eq "diag: exit 1" 1 "$CODE"
+diag=$(printf '%s\n' "$OUT" | sed -n 's/^diagnostics: //p')
+if [[ -n "$diag" && -s "$diag" ]]; then t_pass "diag: log kept and named"; else t_fail "diag: log kept and named" "$(show)"; fi
+expect_eq "diag: work dir removed" "" "$(ls "$WORK/tmp" | grep -v '^agents-restart-.*\.log$' || true)"
+
 t_done

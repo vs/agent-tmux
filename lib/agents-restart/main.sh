@@ -26,19 +26,23 @@ _ar_wait_text() {
 }
 
 # _ar_finish <j> <ok|skip|fail> <text> [<since_ms>] [<dim tail>]: end agent j.
+# Failures are also written to the diagnostics log.
 _ar_finish() {
   A_PEND[$1]=0
   case "$2" in
     ok) AR_N_OK=$((AR_N_OK + 1)) ;;
     skip) AR_N_SKIP=$((AR_N_SKIP + 1)) ;;
-    fail) AR_N_FAIL=$((AR_N_FAIL + 1)) ;;
+    fail)
+      AR_N_FAIL=$((AR_N_FAIL + 1))
+      echo "agents-restart: ${A_ADDR[$1]} (${A_TYPE[$1]} pid ${A_PID[$1]}): $3" >> "$AR_WD/err" ;;
   esac
   ar_ui_set "${A_ROW[$1]}" "$2" "$3" "${4:-}" "${5:-}"
 }
 
 # _ar_manual <j> <cmd>: list a resume command to run by hand under the summary.
 _ar_manual() {
-  AR_MANUAL="$AR_MANUAL$(_ar_pad "${A_ADDR[$1]}" "$AR_UI_W_ADDR")  $2"$'\n'
+  _ar_pad_v "${A_ADDR[$1]}" "$AR_UI_W_ADDR"
+  AR_MANUAL="$AR_MANUAL$_AR_V  $2"$'\n'
 }
 
 # _ar_refresh: fresh process table and Claude listing for the next state checks.
@@ -53,30 +57,37 @@ _ar_pause() {
   n=$(awk -v s="$1" 'BEGIN { n = int(s * 10 + 0.5); print (n < 1 ? 1 : n) }')
   while [[ $n -gt 0 && $AR_INT == 0 ]]; do
     ar_ui_render
-    sleep 0.1 || true
+    sleep 0.1
     n=$((n - 1))
   done
 }
 
-# _ar_restart <j>: restart agent j now (ar_restart_one in the background, with
-# SIGINT ignored, so the live region keeps moving and Ctrl+C can't cut it short).
-# A "state changed" result leaves the agent pending.
+# _ar_restart <j>: restart agent j now: ar_restart_one runs in the background
+# with INT, HUP and TERM ignored (it is bounded by the exit and start
+# timeouts), so the live region keeps moving and neither Ctrl+C nor a closed
+# terminal can leave the agent quit but not resumed. This function returns
+# only after the job has ended. A "state changed" result leaves the agent pending.
 _ar_restart() {
-  local j="$1" t0 sid res job tag reason cmd
-  t0=$(_ar_now_ms)
+  local j="$1" t0 sid res tag reason cmd rc
+  ar_ui_clock; t0=$AR_NOW
   ar_ui_set "${A_ROW[j]}" spin "restarting" "$t0"
   sid=$(ar_session_id "${A_TYPE[j]}" "${A_PID[j]}" "${A_ACWD[j]}" 2>>"$AR_WD/err") || sid=-
   [[ $AR_INT == 0 ]] || return 0
   res="$AR_WD/result.$j"
   rm -f "$res" "$res.tmp"
-  ( set +e; trap '' INT
+  ( set +e; trap '' INT HUP TERM
     ar_restart_one "${A_REC[j]}" "${sid:--}" > "$res.tmp"; mv "$res.tmp" "$res" ) 2>>"$AR_WD/err" &
-  job=$!
-  while [[ ! -e "$res" ]] && kill -0 "$job" 2>/dev/null; do
+  AR_JOB=$!
+  while kill -0 "$AR_JOB" 2>/dev/null; do
     ar_ui_render
-    sleep 0.1 || true
+    sleep 0.1
   done
-  wait "$job" 2>/dev/null || true
+  # wait returns early (>128) when a trapped signal arrives; wait again then.
+  while :; do
+    wait "$AR_JOB" 2>/dev/null; rc=$?
+    [[ $rc -gt 128 ]] && kill -0 "$AR_JOB" 2>/dev/null || break
+  done
+  AR_JOB=""
   IFS=$'\t' read -r tag reason cmd 2>/dev/null < "$res" || true
   case "${tag:-}" in
     ok)
@@ -220,11 +231,30 @@ _ar_pending() {
   echo "$n"
 }
 
+# _ar_cleanup (EXIT trap): remove the work dir, unless a restart job still runs
+# in it (only possible when the shell is killed outright).
+_ar_cleanup() {
+  trap '' INT
+  [[ -z "${AR_PS_FILE:-}" ]] || rm -f "$AR_PS_FILE"
+  if [[ -n "${AR_JOB:-}" ]] && kill -0 "$AR_JOB" 2>/dev/null; then return 0; fi
+  rm -rf "$AR_WD"
+}
+
+# _ar_keep_diag: after a failure, keep the diagnostics log and say where it is.
+_ar_keep_diag() {
+  local f
+  [[ $AR_N_FAIL -gt 0 && -s "$AR_WD/err" ]] || return 0
+  f="${TMPDIR:-/tmp}"; f="${f%/}/agents-restart-$(date +%Y%m%d-%H%M%S)-$$.log"
+  cp "$AR_WD/err" "$f" 2>/dev/null || return 0
+  printf '\n%sdiagnostics: %s%s\n' "$AR_C_DIM" "$f" "$AR_C_OFF"
+}
+
 ar_main() {
   local j first=1 poll
   ar_ui_init
   AR_WD=$(mktemp -d "${TMPDIR:-/tmp}/agents-restart.XXXXXX")
-  trap 'rm -rf "$AR_WD"; [[ -z "${AR_PS_FILE:-}" ]] || rm -f "$AR_PS_FILE"' EXIT
+  AR_JOB=""
+  trap _ar_cleanup EXIT
   A_REC=(); A_ROW=(); A_PEND=(); AR_N_OK=0; AR_N_SKIP=0; AR_N_FAIL=0; AR_MANUAL=""; AR_INT=0
 
   ar_discover "$AR_WD/argv" > "$AR_WD/agents.tsv"
@@ -236,9 +266,12 @@ ar_main() {
   [[ $AR_N -eq 0 || "${AR_YES:-0}" == 1 ]] || _ar_confirm
   echo
 
-  # From here Ctrl+C only sets a flag: the loop stops between agents.
+  # From here Ctrl+C only sets a flag: the loop stops between agents. errexit
+  # is off: a Ctrl+C kills any $(...) running at that moment, and that must not
+  # end the shell while a restart job is in flight.
+  set +e
   trap 'AR_INT=1' INT
-  AR_T0=$(_ar_now_ms)
+  ar_ui_clock; AR_T0=$AR_NOW
   _ar_start_rows
   ar_ui_render
   poll=$(_ar_env_num "${AGENTS_RESTART_POLL:-}" 3 dec)
@@ -257,14 +290,17 @@ ar_main() {
   for ((j = 0; j < AR_COUNT; j++)); do
     [[ ${A_PEND[j]} == 0 ]] || _ar_finish "$j" skip "not restarted (interrupted)"
   done
+  trap '' INT   # nothing is left to interrupt; let the report print whole
   ar_ui_render
 
   echo
-  ar_ui_summary "$AR_N_OK" "$AR_N_SKIP" "$AR_N_FAIL" $(($(_ar_now_ms) - AR_T0))
+  ar_ui_clock
+  ar_ui_summary "$AR_N_OK" "$AR_N_SKIP" "$AR_N_FAIL" $((AR_NOW - AR_T0))
   if [[ -n "$AR_MANUAL" ]]; then
     printf '\nresume by hand:\n'
     printf '%s' "$AR_MANUAL" | sed 's/^/  /'
   fi
+  _ar_keep_diag
   if [[ $AR_INT == 1 ]]; then exit 130; fi
   [[ $AR_N_FAIL -eq 0 ]] || exit 1
 }
