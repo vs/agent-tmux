@@ -147,13 +147,15 @@ _ar_launcher_env() {
 #   claude: claude <kept flags> --resume <sid>
 #   codex:  codex resume <kept flags> <sid>   (`-- <sid>` after a trailing variadic -i)
 #   gemini: gemini <kept flags> --resume <sid>
-# argv0 (plus argv1 for node/bash/sh/python running a script) becomes the bare
-# tool name so the shell picks up the new install. Positional args (initial
+# argv0 (plus argv1 for node/bash/sh/python running a script) becomes <program>
+# (7th arg: callers pass ar_tool_path, the installed CLI's full path; default the
+# bare tool name), so the new install runs even when the pane's shell can't find
+# it by name. Positional args (initial
 # prompts, and codex's subcommand/session words) and everything after `--` are
 # dropped. A launcher script's `env` prefix (-u VAR, NAME=VALUE) is kept; `cd <agent_cwd> &&`
 # is prepended when the agent ran outside the shell's directory.
 ar_resume_cmd() {
-  local type="$1" argf="$2" sid="$3" acwd="${4:--}" scwd="${5:--}" pp="${6:--}"
+  local type="$1" argf="$2" sid="$3" acwd="${4:--}" scwd="${5:--}" pp="${6:--}" prog="${7:-$1}"
   local argv=() kept=() a b0 i n flag cls lastvar=0 out="" w envw rc
   case "$type" in claude|codex|gemini) ;; *) return 1 ;; esac
   [[ -f "$argf" && -n "$sid" ]] || return 1
@@ -202,10 +204,9 @@ ar_resume_cmd() {
 
   local cmd=()
   case "$type" in
-    claude) cmd=(claude ${kept[@]+"${kept[@]}"} --resume "$sid") ;;
-    gemini) cmd=(gemini ${kept[@]+"${kept[@]}"} --resume "$sid") ;;
+    claude|gemini) cmd=("$prog" ${kept[@]+"${kept[@]}"} --resume "$sid") ;;
     codex)
-      cmd=(codex resume ${kept[@]+"${kept[@]}"})
+      cmd=("$prog" resume ${kept[@]+"${kept[@]}"})
       # a trailing variadic option (even with no values yet) would swallow the session ID
       [[ $lastvar == 1 ]] && cmd+=(--)
       cmd+=("$sid") ;;

@@ -33,13 +33,17 @@ t_tmux new-window -d -t s1 -c "$WORK/pa" "sh -c 'claude; read x'"
 t_tmux new-window -d -t s1 -c "$WORK/pa" "$WORK/bin/claude"
 t_tmux new-window -t s1 -c "$WORK/pa"
 t_tmux send-keys -t s1:8 "claude --model m --frobnicate x" Enter
-six() { [ "$(ar_discover "$WORK/d0" | wc -l | tr -d ' ')" = 9 ]; }
+# a shell whose PATH can't find the CLI by name (e.g. started before the install moved)
+t_tmux new-window -t s1 -c "$WORK/pa" "env PATH=/usr/bin:/bin /bin/sh -i"
+sleep 0.5
+t_tmux send-keys -t s1:9 "$WORK/bin/claude" Enter
+six() { [ "$(ar_discover "$WORK/d0" | wc -l | tr -d ' ')" = 10 ]; }
 t_wait 15 six
 mkdir -p "$WORK/d"
 ar_discover "$WORK/d" > "$WORK/d.tsv"
 rec() { awk -F'\t' -v a="$1" '$3 == a' "$WORK/d.tsv"; }
-R0=$(rec s1:0.0); R1=$(rec s1:1.0); R2=$(rec s1:2.0); R3=$(rec s1:3.0); R4=$(rec s1:4.0); R5=$(rec s1:5.0); R6=$(rec s1:6.0); R7=$(rec s1:7.0); R8=$(rec s1:8.0)
-for r in "$R0" "$R1" "$R2" "$R3" "$R4" "$R5" "$R6" "$R7" "$R8"; do setscreen "$(fld "$r" 6)" "$IDLE"; done
+R0=$(rec s1:0.0); R1=$(rec s1:1.0); R2=$(rec s1:2.0); R3=$(rec s1:3.0); R4=$(rec s1:4.0); R5=$(rec s1:5.0); R6=$(rec s1:6.0); R7=$(rec s1:7.0); R8=$(rec s1:8.0); R9=$(rec s1:9.0)
+for r in "$R0" "$R1" "$R2" "$R3" "$R4" "$R5" "$R6" "$R7" "$R8" "$R9"; do setscreen "$(fld "$r" 6)" "$IDLE"; done
 sleep 1
 t_use_version claude 2.0.0   # the upgrade
 loglines() { wc -l < "$FAKE_AGENT_LOG" | tr -d ' '; }
@@ -102,7 +106,7 @@ P2=$(fld "$R2" 6)
 t_tmux send-keys -t s1:2 "HANG" Enter
 sleep 0.5
 out=$(AGENTS_RESTART_EXIT_TIMEOUT=2 ar_restart_one "$R2" "fake-$P2")
-expect_eq "hang: result" $'fail\tdidn\'t exit within 2s\tclaude --resume fake-'"$P2" "$out"
+expect_eq "hang: result" $'fail\tdidn\'t exit within 2s\t'"$WORK/bin/claude --resume fake-$P2" "$out"
 expect_eq "hang: agent alive" 0 "$(alive "$P2"; echo $?)"
 expect_eq "hang: nothing started" "$before" "$(loglines)"
 
@@ -136,6 +140,14 @@ expect_eq "ok: new sid is the resumed one" "$SID0" "$newsid"
 expect_eq "ok: old agent gone" 1 "$(alive "$(fld "$R0" 6)"; echo $?)"
 expect_eq "ok: new start logged with 2.0.0 and --resume" 1 \
   "$(grep -c "^--resume"$'\x1f'"$SID0"$'\t2.0.0$' "$FAKE_AGENT_LOG")"
+
+# the pane's shell can't find `claude` by name: the resume command uses the
+# installed CLI's full path, so it still comes back
+P9=$(fld "$R9" 6)
+out=$(AGENTS_RESTART_START_TIMEOUT=5 ar_restart_one "$R9" "fake-$P9")
+expect_eq "shell without the CLI on PATH: ok" ok "$(echo "$out" | cut -f1)"
+expect_eq "shell without the CLI on PATH: resumed with 2.0.0" 1 \
+  "$(grep -c "^--resume"$'\x1f'"fake-$P9"$'\t2.0.0$' "$FAKE_AGENT_LOG")"
 
 # bad timeout values fall back to defaults and still work
 out=$(AGENTS_RESTART_EXIT_TIMEOUT=x AGENTS_RESTART_START_TIMEOUT=y ar_restart_one "$R4" "fake-$(fld "$R4" 6)")
@@ -196,7 +208,7 @@ printf '#!/bin/sh\n[ "$1" = --version ] && { echo 0.168.0; exit 0; }\nsleep 1\ne
 chmod +x "$WORK/installs/codex/0.168.0/codex"
 t_use_version codex 0.168.0
 out=$(AGENTS_RESTART_START_TIMEOUT=3 ar_restart_one "$RC2" "019a1adf-8398-72b1-b333-af3dfa74fe00")
-expect_eq "codex exits after 1 s: didn't come back" $'fail\tdidn\'t come back\tcodex resume 019a1adf-8398-72b1-b333-af3dfa74fe00' "$out"
+expect_eq "codex exits after 1 s: didn't come back" $'fail\tdidn\'t come back\t'"$WORK/bin/codex resume 019a1adf-8398-72b1-b333-af3dfa74fe00" "$out"
 expect_eq "settle secs: junk -> default" 3 "$(_ar_pos_int x 3)"
 
 t_done

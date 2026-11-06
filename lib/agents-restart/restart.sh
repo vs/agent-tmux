@@ -109,7 +109,7 @@ ar_restart_one() {
   # a whitespace-split argv (no python3, or its helper failed) may have split
   # or joined arguments: never build a resume command from it
   if [[ "$exact" != 1 ]]; then _ar_fail "can't read exact arguments"; return 0; fi
-  rc=0; cmd=$(ar_resume_cmd "$type" "$argf" "$sid" "$acwd" "$scwd" "$parent") || rc=$?
+  rc=0; cmd=$(ar_resume_cmd "$type" "$argf" "$sid" "$acwd" "$scwd" "$parent" "$(ar_tool_path "$type")") || rc=$?
   if [[ $rc == 3 && -n "$cmd" ]]; then
     echo "agents-restart: $pane: $cmd; nothing sent" >&2
     _ar_fail "$cmd"; return 0

@@ -107,7 +107,8 @@ _ar_restart() {
       cmd=""
       if [[ "${sid:--}" != - ]]; then
         cmd=$(ar_resume_cmd "${A_TYPE[j]}" "${A_ARGF[j]}" "$sid" "${A_ACWD[j]}" \
-          "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" 2>/dev/null) || cmd=""
+          "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" \
+          "$(ar_tool_path "${A_TYPE[j]}")" 2>/dev/null) || cmd=""
       fi
       [[ -z "$cmd" ]] || _ar_manual "$j" "$cmd   (if it isn't running)" ;;
   esac
@@ -217,7 +218,8 @@ _ar_start_rows() {
         cmd=""
         if [[ "${A_SID[j]}" != - && "${A_EXACT[j]}" == 1 ]]; then
           cmd=$(ar_resume_cmd "${A_TYPE[j]}" "${A_ARGF[j]}" "${A_SID[j]}" "${A_ACWD[j]}" \
-            "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" 2>/dev/null) || cmd=""
+            "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" \
+            "$(ar_tool_path "${A_TYPE[j]}")" 2>/dev/null) || cmd=""
         fi
         [[ -z "$cmd" ]] || _ar_manual "$j" "$cmd   (this pane: quit it first)" ;;
       "not installed") _ar_finish "$j" skip "skipped: ${A_TYPE[j]} not installed" ;;

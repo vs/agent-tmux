@@ -54,6 +54,15 @@ check "claude bool flags kept" claude 'claude|--dangerously-skip-permissions|--v
 check "claude interpreted (node)" claude 'node|/x/claude.js|--name|n|p' claude --name n --resume "$NEW"
 check "claude interpreted (bash)" claude 'bash|/x/claude|-c' claude --resume "$NEW"
 
+printf '%s\0' /old/2.1.317/claude --model m > "$AF"
+expect_eq "program word: the given full path" "/opt/x/latest/claude --model m --resume $NEW" \
+  "$(ar_resume_cmd claude "$AF" "$NEW" /w /w - /opt/x/latest/claude)"
+printf '%s\0' node /x/codex.js -m o > "$AF"
+expect_eq "program word: codex full path" "/opt/c/codex resume -m o $NEW" \
+  "$(ar_resume_cmd codex "$AF" "$NEW" /w /w - /opt/c/codex)"
+expect_eq "ar_tool_path: absolute path on PATH" "$WORK/bin/claude" "$(t_install_fake claude 9.9.9; t_use_version claude 9.9.9; ar_tool_path claude)"
+expect_eq "ar_tool_path: missing CLI -> nothing" "" "$(ar_tool_path no-such-agent-cli)"
+
 check "claude drops --cloud with value" claude 'claude|--cloud|desc|--model|m' claude --model m --resume "$NEW"
 check "claude drops --cloud without value" claude 'claude|--cloud|--model|m' claude --model m --resume "$NEW"
 check "claude drops --cloud=x" claude 'claude|--cloud=x|--model|m' claude --model m --resume "$NEW"

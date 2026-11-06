@@ -217,6 +217,18 @@ ar_running_version() {
   echo "$v"
 }
 
+# ar_tool_path <type> -> the absolute path `command -v <type>` finds on this
+# PATH (the same CLI ar_installed_version checked), or nothing. Resume commands
+# use it because a pane's shell may not find the CLI by name (its PATH can
+# predate the install, e.g. an agent started from a since-removed Homebrew).
+# It keeps symlinks such as mise's .../latest/claude, so it follows upgrades.
+ar_tool_path() {
+  local p
+  p=$(command -v "$1" 2>/dev/null) || p=""
+  [[ "$p" == /* ]] && echo "$p"
+  return 0
+}
+
 # ar_installed_version <type> -> semver of `<type> --version` on PATH; cached per
 # type (the cache only persists when called outside $(...)).
 ar_installed_version() {
