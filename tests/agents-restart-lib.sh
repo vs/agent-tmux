@@ -99,7 +99,8 @@ hang=0
 while IFS= read -r line; do
   case "$line" in
     HANG) hang=1 ;;
-    /exit|/quit) [[ $hang == 1 ]] || exit 0 ;;
+    /exit) [[ $hang == 1 || "$tool" != claude ]] || exit 0 ;;
+    /quit) [[ $hang == 1 || "$tool" == claude ]] || exit 0 ;;
   esac
 done
 FAKE

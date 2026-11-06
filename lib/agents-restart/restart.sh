@@ -21,26 +21,41 @@ _ar_pid_gone() {
 
 # _ar_send <sock> <pane> <text>: type text, pause, press Enter. Separate
 # send-keys calls: Codex swallows an Enter sent in the same call.
+# Returns 1 when the text was not typed, 2 when it was typed but Enter failed.
 _ar_send() {
   ar_tmux "$1" send-keys -t "$2" -l "$3" </dev/null || return 1
   sleep 0.5
-  ar_tmux "$1" send-keys -t "$2" Enter </dev/null
+  ar_tmux "$1" send-keys -t "$2" Enter </dev/null || return 2
+}
+
+# _ar_pos_int <value> <default> -> value when an integer >= 1, else default.
+_ar_pos_int() {
+  local v
+  v=$(_ar_env_num "$1" "$2" int)
+  [[ "$v" -ge 1 ]] || v="$2"
+  echo "$v"
 }
 
 # _ar_quit_and_type <sock> <pane> <type> <pid> <pane_pid> <resume_cmd> <exit_timeout>
 # Steps 2-4 of ar_restart_one. Returns 0 once the resume command is typed; on
 # any failure prints the fail line itself and returns 1 (nothing more is sent).
 _ar_quit_and_type() {
-  local sock="$1" pane="$2" type="$3" pid="$4" ppid="$5" cmd="$6" tmo="$7" quit deadline
+  local sock="$1" pane="$2" type="$3" pid="$4" ppid="$5" cmd="$6" tmo="$7" quit deadline src
   quit=/quit; [[ "$type" == claude ]] && quit=/exit
-  _ar_send "$sock" "$pane" "$quit" || { _ar_fail "state changed"; return 1; }
+  src=0
+  _ar_send "$sock" "$pane" "$quit" || src=$?
+  case "$src" in
+    0) ;;
+    1) _ar_fail "state changed"; return 1 ;;
+    *) _ar_fail "quit key not sent; $quit left in input" "$cmd"; return 1 ;;
+  esac
   deadline=$(( $(date +%s) + tmo ))
   until _ar_pid_gone "$pid" && _ar_shell_foreground "$ppid"; do
     if [[ $(date +%s) -ge $deadline ]]; then
       if _ar_pid_gone "$pid"; then
         _ar_fail "shell not at prompt" "$cmd"
       else
-        _ar_fail "didn't exit within ${tmo}s"
+        _ar_fail "didn't exit within ${tmo}s" "$cmd"
       fi
       return 1
     fi
@@ -48,7 +63,13 @@ _ar_quit_and_type() {
   done
   # Re-check right before typing: something may have grabbed the terminal since.
   if ! _ar_shell_foreground "$ppid"; then _ar_fail "shell not at prompt" "$cmd"; return 1; fi
-  _ar_send "$sock" "$pane" "$cmd" || { _ar_fail "shell not at prompt" "$cmd"; return 1; }
+  src=0
+  _ar_send "$sock" "$pane" "$cmd" || src=$?
+  case "$src" in
+    0) ;;
+    1) _ar_fail "shell not at prompt" "$cmd"; return 1 ;;
+    *) _ar_fail "resume command typed but not submitted" "$cmd"; return 1 ;;
+  esac
 }
 
 # ar_restart_one <record> <sid> -> exactly one stdout line:
@@ -67,22 +88,36 @@ _ar_quit_and_type() {
 # its resume command typed. The caller's INT trap is restored afterwards; an INT
 # that arrives in that window is not replayed, so Task 7 must not rely on
 # delivery during a restart (its trap only matters between and after panes).
+# The caller's INT handler must be flag-only (set a variable, nothing else): the
+# saved trap string is re-installed in this shell, and subshells such as $(...)
+# inherit it.
 ar_restart_one() {
   local record="$1" sid="${2:--}"
   local sock pane addr folder type pid rv iv acwd scwd argf parent exact
   IFS=$'\t' read -r sock pane addr folder type pid rv iv acwd scwd argf parent exact <<<"$record"
-  local etmo stmo cmd ppid st old_trap rc deadline hit npid row nsid
+  local etmo stmo cmd ppid tpg st old_trap rc deadline hit npid row nsid
 
-  etmo=$(_ar_env_num "${AGENTS_RESTART_EXIT_TIMEOUT:-}" 15 int)
-  stmo=$(_ar_env_num "${AGENTS_RESTART_START_TIMEOUT:-}" 20 int)
+  etmo=$(_ar_pos_int "${AGENTS_RESTART_EXIT_TIMEOUT:-}" 15)
+  stmo=$(_ar_pos_int "${AGENTS_RESTART_START_TIMEOUT:-}" 20)
 
   # 1. precheck: everything is verified before any key is sent
   if [[ -z "$sid" || "$sid" == - ]]; then _ar_fail "no session id"; return 0; fi
+  if [[ ! "$pid" =~ ^[0-9]+$ ]]; then echo "agents-restart: bad agent pid '$pid'" >&2; _ar_fail "state changed"; return 0; fi
   if [[ -z "$argf" || "$argf" == - || ! -r "$argf" ]]; then _ar_fail "can't read arguments"; return 0; fi
   cmd=$(ar_resume_cmd "$type" "$argf" "$sid" "$acwd" "$scwd" "$parent") || cmd=""
   if [[ -z "$cmd" ]]; then _ar_fail "can't read arguments"; return 0; fi
   ppid=$(ar_tmux "$sock" display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null </dev/null) || ppid=""
   if [[ -z "$ppid" ]]; then echo "agents-restart: pane $pane not found" >&2; _ar_fail "state changed"; return 0; fi
+  # The agent must be a job in the foreground of a job-control shell we can
+  # return to: not the pane's own process (/exit would close the pane), and not
+  # sharing the pane process's group (`sh -c 'agent; more'`, where the wait
+  # below would pass at once and the command would be typed into whatever runs
+  # next).
+  tpg=$(ps -o tpgid= -p "$ppid" 2>/dev/null </dev/null | tr -d ' ') || tpg=""
+  if [[ ! "$ppid" =~ ^[0-9]+$ || "$pid" == "$ppid" || -z "$tpg" || "$tpg" == "$ppid" ]]; then
+    echo "agents-restart: $pane has no job-control shell to return to; nothing sent" >&2
+    _ar_fail "pane has no shell to return to"; return 0
+  fi
   [[ "$type" != claude ]] || ar_claude_refresh
   st=$(ar_state "$type" "$sock" "$pane" "$pid" "$argf") || st=""
   if [[ "$st" != idle ]]; then
@@ -103,9 +138,9 @@ ar_restart_one() {
   while :; do
     ar_ps_snapshot
     hit=$(ar_agent_in_pane "$ppid")
-    npid="${hit%%$'	'*}"
+    npid="${hit%%$'\t'*}"
     if [[ -n "$npid" && "$npid" != "$pid" ]]; then
-      if [[ "$type" != claude ]]; then echo "ok	-"; return 0; fi
+      if [[ "$type" != claude ]]; then printf 'ok\t-\n'; return 0; fi
       ar_claude_refresh
       row=$(_ar_claude_row "$npid")
       if [[ -n "$row" ]]; then
