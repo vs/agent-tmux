@@ -13,6 +13,12 @@ expect_eq "no version in path" "" "$(ar_version_from_path /usr/local/bin/claude)
 expect "outdated unknown" 0 "" ar_outdated - 2.0.0
 expect "outdated differs" 0 "" ar_outdated 1.0.0 2.0.0
 expect "not outdated" 1 "" ar_outdated 2.0.0 2.0.0
+expect "older patch is outdated" 0 "" ar_outdated 2.1.310 2.1.318
+expect "numeric, not string, compare" 0 "" ar_outdated 2.1.9 2.1.10
+expect "newer running is not outdated" 1 "" ar_outdated 2.1.320 2.1.318
+expect "newer major is not outdated" 1 "" ar_outdated 3.0.0 2.9.9
+expect "leading zeros are decimal" 0 "" ar_outdated 1.08.0 1.9.0
+expect "installed unknown counts as outdated" 0 "" ar_outdated 1.0.0 -
 
 t_install_fake claude 1.0.0
 t_install_fake claude 2.0.0

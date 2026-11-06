@@ -235,9 +235,22 @@ ar_installed_version() {
   echo "$v"
 }
 
-# ar_outdated <running_ver> <installed_ver> -> 0 when unknown or different.
+# ar_outdated <running_ver> <installed_ver> -> 0 when the running version is
+# unknown ("-") or older than the installed one (numeric per component). A
+# newer running build (e.g. a per-project pin) is left alone. When either
+# isn't x.y.z (installed "-": the CLI is gone from PATH) it counts as outdated,
+# so the plan shows it (as not installed).
 ar_outdated() {
-  [[ "$1" == "-" || "$1" != "$2" ]]
+  local re='^[0-9]+\.[0-9]+\.[0-9]+$' a b i
+  [[ "$1" != "-" ]] || return 0
+  [[ "$1" =~ $re && "$2" =~ $re ]] || return 0
+  IFS=. read -r -a a <<<"$1"
+  IFS=. read -r -a b <<<"$2"
+  for i in 0 1 2; do
+    if ((10#${a[i]} < 10#${b[i]})); then return 0; fi
+    if ((10#${a[i]} > 10#${b[i]})); then return 1; fi
+  done
+  return 1
 }
 
 # ar_discover <workdir> -> one TSV record per agent pane:
