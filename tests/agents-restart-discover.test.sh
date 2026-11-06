@@ -48,7 +48,7 @@ expect_eq "old: type" claude "$(f "$r1" 5)"
 expect_eq "old: running" 1.0.0 "$(f "$r1" 7)"
 expect_eq "old: installed" 2.0.0 "$(f "$r1" 8)"
 expect_eq "old: addr" "s1:0.0" "$(f "$r1" 3)"
-expect_eq "old: argv file" "$WORK/d/$(f "$r1" 2).argv" "$(f "$r1" 11)"
+expect_eq "old: argv file" "$WORK/d/0.$(f "$r1" 2).argv" "$(f "$r1" 11)"
 expect_eq "old: argv exact" 1 "$(f "$r1" 13)"
 expect_eq "old: pid numeric" 1 "$(f "$r1" 6 | grep -cE '^[0-9]+$')"
 ar_outdated "$(f "$r1" 7)" "$(f "$r1" 8)" && ok=0 || ok=1
@@ -144,5 +144,33 @@ set -e
 expect_eq "discover survives vanished agent (rc)" 0 "$vrc"
 expect_eq "vanished agent yields no record" 0 "$(awk -F'\t' '$6 == 99999' "$WORK/dv.out" | wc -l | tr -d ' ')"
 source lib/agents-restart/discover.sh
+
+# --- two servers: the same pane id on each, a different agent in each
+S2="ar-test2-$$"
+SP1=$(t_tmux list-sessions -F '#{socket_path}' | head -1)
+ALIAS="ar-alias-$$"
+ln -s "$SP1" "$(dirname "$SP1")/$ALIAS"   # a second name for server 1
+trap 'tmux -L "$S2" kill-server 2>/dev/null || true; rm -f "$(dirname "$SP1")/$ALIAS" "$(dirname "$SP1")/$S2"; t_cleanup' EXIT
+mkdir -p "$WORK/q2"
+tmux -L "$S2" -f /dev/null start-server \; set-option -g default-shell /bin/sh \; \
+  new-session -d -s t2 -x 200 -y 50 -c "$WORK/q2"
+tmux -L "$S2" send-keys -t t2 "claude --name other" Enter
+expect_eq "server 2 pane id matches server 1's first pane" "%0" "$(tmux -L "$S2" display-message -p -t t2 '#{pane_id}')"
+export AGENTS_RESTART_SOCKETS="$SWARM_TMUX_SOCKET $S2 $ALIAS ar-none-$$"
+expect_eq "sockets deduped by socket path, dead ones left out" "$SWARM_TMUX_SOCKET"$'\n'"$S2" "$(ar_sockets)"
+q2_up() { ar_discover "$WORK/d2" | awk -F'\t' '$4 == "q2"' | grep -q .; }
+t_wait 10 q2_up
+out4=$(ar_discover "$WORK/d2")
+ra=$(echo "$out4" | awk -F'\t' -v s="$SWARM_TMUX_SOCKET" '$1 == s && $2 == "%0"')
+rb=$(echo "$out4" | awk -F'\t' -v s="$S2" '$1 == s && $2 == "%0"')
+expect_eq "server 1 %0 record" pa "$(f "$ra" 4)"
+expect_eq "server 2 %0 record" q2 "$(f "$rb" 4)"
+expect_eq "argv files differ per server" 1 "$([ "$(f "$ra" 11)" != "$(f "$rb" 11)" ] && echo 1 || echo 0)"
+expect_eq "server 1 argv is its own agent's" "$WORK/installs/claude/1.0.0/claude" "$(tr '\0' '\n' < "$(f "$ra" 11)" | sed -n 2p)"
+expect_eq "server 2 argv is its own agent's" "--name other" "$(tr '\0' '\n' < "$(f "$rb" 11)" | tail -2 | paste -sd' ' -)"
+expect_eq "addr names the socket (server 1)" "$SWARM_TMUX_SOCKET:s1:0.0" "$(f "$ra" 3)"
+expect_eq "addr names the socket (server 2)" "$S2:t2:0.0" "$(f "$rb" 3)"
+expect_eq "no duplicate records via the alias" 0 "$(echo "$out4" | awk -F'\t' -v s="$ALIAS" '$1 == s' | wc -l | tr -d ' ')"
+export AGENTS_RESTART_SOCKETS="$SWARM_TMUX_SOCKET"
 
 t_done

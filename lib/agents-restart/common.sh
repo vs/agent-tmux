@@ -5,9 +5,10 @@ _AR_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ar_die() { echo "agents-restart: error: $*" >&2; exit 1; }
 ar_warn() { echo "agents-restart: warning: $*" >&2; }
 
-# ar_sockets -> one tmux socket per line; "-" is the default server.
-# AGENTS_RESTART_SOCKETS (space-separated) overrides the default scope.
-ar_sockets() {
+# _ar_socket_candidates -> the sockets in scope, one per line; "-" is the
+# default server. AGENTS_RESTART_SOCKETS (space-separated) overrides the
+# default scope (default server plus $SWARM_TMUX_SOCKET).
+_ar_socket_candidates() {
   local s
   if [[ -n "${AGENTS_RESTART_SOCKETS:-}" ]]; then
     for s in $AGENTS_RESTART_SOCKETS; do echo "$s"; done
@@ -15,6 +16,20 @@ ar_sockets() {
   fi
   echo "-"
   [[ -z "${SWARM_TMUX_SOCKET:-}" ]] || echo "$SWARM_TMUX_SOCKET"
+}
+
+# ar_sockets -> the candidates, one per server: deduped by #{socket_path}
+# (the swarm socket may be the default server), and sockets with no running
+# server left out (they have no panes).
+ar_sockets() {
+  local s sp seen=$'\n'
+  while IFS= read -r s; do
+    sp=$(ar_tmux "$s" list-sessions -F '#{socket_path}' 2>/dev/null </dev/null | head -1) || sp=""
+    [[ -n "$sp" ]] || continue
+    case "$seen" in *$'\n'"$sp"$'\n'*) continue ;; esac
+    seen="$seen$sp"$'\n'
+    echo "$s"
+  done < <(_ar_socket_candidates)
 }
 
 # ar_tmux <sock> <args...> -> tmux against that socket ("-" = default server).

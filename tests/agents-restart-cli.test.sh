@@ -8,9 +8,9 @@ cd "$T_REPO"
 expect "help" 0 "usage: agents-restart" agents-restart --help
 expect "bad flag" 2 "usage: agents-restart" agents-restart --nope
 
-expect_eq "sockets default" "-" "$(env -u SWARM_TMUX_SOCKET -u AGENTS_RESTART_SOCKETS bash -c 'source lib/agents-restart/common.sh; ar_sockets')"
-expect_eq "sockets with swarm" $'-\nfoo' "$(env -u AGENTS_RESTART_SOCKETS SWARM_TMUX_SOCKET=foo bash -c 'source lib/agents-restart/common.sh; ar_sockets')"
-expect_eq "sockets override" $'-\nbar' "$(AGENTS_RESTART_SOCKETS='- bar' bash -c 'source lib/agents-restart/common.sh; ar_sockets')"
+expect_eq "sockets default" "-" "$(env -u SWARM_TMUX_SOCKET -u AGENTS_RESTART_SOCKETS bash -c 'source lib/agents-restart/common.sh; _ar_socket_candidates')"
+expect_eq "sockets with swarm" $'-\nfoo' "$(env -u AGENTS_RESTART_SOCKETS SWARM_TMUX_SOCKET=foo bash -c 'source lib/agents-restart/common.sh; _ar_socket_candidates')"
+expect_eq "sockets override" $'-\nbar' "$(AGENTS_RESTART_SOCKETS='- bar' bash -c 'source lib/agents-restart/common.sh; _ar_socket_candidates')"
 
 python3 -c 'import time; time.sleep(30)' "a b" '{"k": 1}' &
 sp=$!

@@ -242,12 +242,25 @@ ar_outdated() {
 
 # ar_discover <workdir> -> one TSV record per agent pane:
 # sock pane addr folder type pid running_ver installed_ver agent_cwd shell_cwd argv_file parent_pid argv_exact
+# Pane IDs are per server: argv files are named <socket index>.<pane>.argv, and
+# when more than one server has panes, addr is prefixed with the socket name
+# ("default" for the default server), e.g. swarm:37:2.0.
 ar_discover() {
   local workdir="$1" sock pane addr ppid shell_cwd hit pid type
-  local rv iv acwd folder argv_file rc exact parent scwd
+  local rv iv acwd folder argv_file rc exact parent scwd panes nsock si s socks=()
   mkdir -p "$workdir"
   ar_ps_snapshot
+  panes=$(ar_panes)
+  nsock=$(printf '%s\n' "$panes" | awk -F'\t' 'NF { print $1 }' | sort -u | wc -l | tr -d ' ')
   while IFS=$'\t' read -r sock pane addr ppid shell_cwd; do
+    [[ -n "$sock" ]] || continue
+    si=0
+    for s in ${socks[@]+"${socks[@]}"}; do [[ "$s" == "$sock" ]] && break; si=$((si + 1)); done
+    [[ $si -lt ${#socks[@]} ]] || socks+=("$sock")
+    if [[ "$nsock" -gt 1 ]]; then
+      s="$sock"; [[ "$s" != - ]] || s=default
+      addr="$s:$addr"
+    fi
     hit=$(ar_agent_in_pane "$ppid")
     [[ -n "$hit" ]] || continue
     pid="${hit%%$'\t'*}"; type="${hit#*$'\t'}"
@@ -260,7 +273,7 @@ ar_discover() {
     scwd=$(_ar_lsof_field "$ppid" cwd)
     if [[ -n "$scwd" ]]; then shell_cwd="$scwd"; fi
 
-    argv_file="$workdir/$pane.argv"
+    argv_file="$workdir/$si.$pane.argv"
     rc=0; ar_argv "$pid" "$argv_file" || rc=$?
     case "$rc" in
       0) exact=1 ;;
@@ -273,5 +286,5 @@ ar_discover() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$sock" "$pane" "$addr" "$folder" "$type" "$pid" "$rv" "$iv" \
       "$acwd" "$shell_cwd" "$argv_file" "$parent" "$exact"
-  done < <(ar_panes)
+  done <<<"$panes"
 }
