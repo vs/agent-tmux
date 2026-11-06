@@ -95,12 +95,23 @@ draw
 poller=$!
 trap '[[ "$tool" == claude ]] && rm -f "$work/agents/$pid" "$work/agents/$pid.json"; rm -f "$screen"; kill "$poller" 2>/dev/null' EXIT
 
+# HANG: ignore quits from now on. SLOW: take 2 s to exit after a quit.
+# An accepted quit is logged to $work/quits.log as "<pid> <TAB> <word>".
 hang=0
+slow=0
+quitword=/quit
+[[ "$tool" == claude ]] && quitword=/exit
 while IFS= read -r line; do
   case "$line" in
     HANG) hang=1 ;;
-    /exit) [[ $hang == 1 || "$tool" != claude ]] || exit 0 ;;
-    /quit) [[ $hang == 1 || "$tool" == claude ]] || exit 0 ;;
+    SLOW) slow=1 ;;
+    "$quitword")
+      if [[ $hang == 0 ]]; then
+        printf '%s\t%s\n' "$pid" "$line" >> "$work/quits.log"
+        [[ $slow == 0 ]] || sleep 2
+        exit 0
+      fi
+      ;;
   esac
 done
 FAKE
@@ -123,3 +134,11 @@ t_use_version() {
 t_agent_set() {
   echo "$2" > "$WORK/agents/.$1.tmp" && mv "$WORK/agents/.$1.tmp" "$WORK/agents/$1.json"
 }
+
+# An empty, recognizable Claude input box (rule, prompt, rule, footer). The
+# fake's default screen ("❯ ") reads as unrecognized.
+T_RULE=$(printf '─%.0s' $(seq 1 40))
+T_CLAUDE_IDLE=$(printf '%s\n❯ \n%s\n  ⏵⏵ auto mode on (shift+tab to cycle)\n' "$T_RULE" "$T_RULE")
+
+# t_setscreen <pid> <text>: what the fake agent <pid> draws (redrawn within 0.2 s).
+t_setscreen() { printf '%s' "$2" > "$WORK/screen/$1"; }

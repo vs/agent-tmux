@@ -11,9 +11,9 @@ source lib/agents-restart/sessions.sh
 source lib/agents-restart/resume.sh
 source lib/agents-restart/restart.sh
 
-RULE=$(printf '─%.0s' $(seq 1 40))
-IDLE=$(printf '%s\n❯ \n%s\n  ⏵⏵ auto mode on (shift+tab to cycle)\n' "$RULE" "$RULE")
-setscreen() { printf '%s' "$2" > "$WORK/screen/$1"; }
+RULE=$T_RULE
+IDLE=$T_CLAUDE_IDLE
+setscreen() { t_setscreen "$@"; }
 fld() { echo "$1" | cut -f"$2"; }
 
 t_install_fake claude 1.0.0

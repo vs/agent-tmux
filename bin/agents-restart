@@ -28,11 +28,6 @@ ar_usage() {
   echo "usage: agents-restart [-y] [--dry-run] [-h|--help]"
 }
 
-# Task 7 defines the real ar_main in lib/agents-restart/main.sh.
-if ! declare -F ar_main >/dev/null; then
-  ar_main() { return 0; }
-fi
-
 AR_YES=0
 AR_DRY_RUN=0
 while [[ $# -gt 0 ]]; do
