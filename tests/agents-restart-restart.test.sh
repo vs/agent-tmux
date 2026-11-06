@@ -31,13 +31,15 @@ t_tmux send-keys -t s1:5 "claude" Enter
 # pane shapes with no job-control shell to return to
 t_tmux new-window -d -t s1 -c "$WORK/pa" "sh -c 'claude; read x'"
 t_tmux new-window -d -t s1 -c "$WORK/pa" "$WORK/bin/claude"
-six() { [ "$(ar_discover "$WORK/d0" | wc -l | tr -d ' ')" = 8 ]; }
+t_tmux new-window -t s1 -c "$WORK/pa"
+t_tmux send-keys -t s1:8 "claude --model m --frobnicate x" Enter
+six() { [ "$(ar_discover "$WORK/d0" | wc -l | tr -d ' ')" = 9 ]; }
 t_wait 15 six
 mkdir -p "$WORK/d"
 ar_discover "$WORK/d" > "$WORK/d.tsv"
 rec() { awk -F'\t' -v a="$1" '$3 == a' "$WORK/d.tsv"; }
-R0=$(rec s1:0.0); R1=$(rec s1:1.0); R2=$(rec s1:2.0); R3=$(rec s1:3.0); R4=$(rec s1:4.0); R5=$(rec s1:5.0); R6=$(rec s1:6.0); R7=$(rec s1:7.0)
-for r in "$R0" "$R1" "$R2" "$R3" "$R4" "$R5" "$R6" "$R7"; do setscreen "$(fld "$r" 6)" "$IDLE"; done
+R0=$(rec s1:0.0); R1=$(rec s1:1.0); R2=$(rec s1:2.0); R3=$(rec s1:3.0); R4=$(rec s1:4.0); R5=$(rec s1:5.0); R6=$(rec s1:6.0); R7=$(rec s1:7.0); R8=$(rec s1:8.0)
+for r in "$R0" "$R1" "$R2" "$R3" "$R4" "$R5" "$R6" "$R7" "$R8"; do setscreen "$(fld "$r" 6)" "$IDLE"; done
 sleep 1
 t_use_version claude 2.0.0   # the upgrade
 loglines() { wc -l < "$FAKE_AGENT_LOG" | tr -d ' '; }
@@ -56,6 +58,15 @@ expect_eq "no sid: nothing started" "$before" "$(loglines)"
 bad="${R1/$WORK\/d\//$WORK/d/nope-}"
 out=$(ar_restart_one "$bad" "sid")
 expect_eq "unreadable argv" $'fail\tcan\'t read arguments\t-' "$out"
+
+# a flag not in the tables: no resume command, nothing sent
+P8=$(fld "$R8" 6)
+out=$(ar_restart_one "$R8" "fake-$P8" 2>/dev/null)
+expect_eq "unknown flag: result" $'fail\tunknown flag --frobnicate\t-' "$out"
+sleep 1
+expect_eq "unknown flag: agent alive" 0 "$(alive "$P8"; echo $?)"
+expect_eq "unknown flag: nothing started" "$before" "$(loglines)"
+expect_eq "unknown flag: no quit sent" 0 "$({ cat "$WORK/quits.log" 2>/dev/null || true; } | grep -c "^$P8" || true)"
 
 # not idle: unsent draft
 setscreen "$(fld "$R1" 6)" "$(printf '%s\n❯ half typed\n%s\n  footer\n' "$RULE" "$RULE")"

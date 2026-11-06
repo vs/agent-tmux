@@ -58,6 +58,10 @@ check "claude drops --cloud with value" claude 'claude|--cloud|desc|--model|m' c
 check "claude drops --cloud without value" claude 'claude|--cloud|--model|m' claude --model m --resume "$NEW"
 check "claude drops --cloud=x" claude 'claude|--cloud=x|--model|m' claude --model m --resume "$NEW"
 check "claude drops --bg --background --desktop" claude 'claude|--bg|--background|--desktop|--model|m' claude --model m --resume "$NEW"
+# hidden value flags (swarm lieutenants use the first two)
+check "claude hidden value flags" claude 'claude|--teammate-mode|tmux|--append-system-prompt-file|/p/prompt.md|--system-prompt-file|/s.md|--agent-name|a|--agent-color|blue|--parent-session-id|pid|brief' \
+  claude --teammate-mode tmux --append-system-prompt-file /p/prompt.md --system-prompt-file /s.md --agent-name a --agent-color blue --parent-session-id pid --resume "$NEW"
+check "claude more booleans" claude 'claude|--ide|--chrome|--bare|--strict-mcp-config|-p' claude --ide --chrome --bare --strict-mcp-config -p --resume "$NEW"
 
 # --- codex ---
 check "codex node script" codex 'node|/x/codex.js|-m|o3|do X' codex resume -m o3 "$NEW"
@@ -72,12 +76,16 @@ check "codex -- drops rest" codex 'codex|-m|o|--|x' codex resume -m o "$NEW"
 check "codex trailing -i variadic: -- before id" codex 'codex|-i|a.png|b.png' codex resume -i a.png b.png -- "$NEW"
 check "codex trailing -i with no values: -- before id" codex 'codex|-m|o|-i' codex resume -m o -i -- "$NEW"
 check "codex drops --include-non-interactive" codex 'codex|resume|--include-non-interactive|x' codex resume "$NEW"
+check "codex booleans kept" codex 'codex|--yolo|--search|--no-alt-screen|--oss|hi' codex resume --yolo --search --no-alt-screen --oss "$NEW"
 
 # --- gemini ---
 check "gemini node, -r latest" gemini 'node|/x/gemini|-r|latest|-m|pro' gemini -m pro --resume "$NEW"
 check "gemini drops prompts" gemini 'gemini|-p|hi|-i|there|--session-id|abc|-y|query' gemini -y --resume "$NEW"
 check "gemini --resume=latest" gemini 'gemini|--resume=latest|--approval-mode|yolo' gemini --approval-mode yolo --resume "$NEW"
-check "gemini variadic array" gemini 'gemini|--include-directories|a|b|-m|x' gemini --include-directories a b -m x --resume "$NEW"
+# yargs arrays here have nargs 1: one value each; the next word is a positional
+check "gemini array option takes one value" gemini 'gemini|--include-directories|a|b|-m|x' gemini --include-directories a -m x --resume "$NEW"
+check "gemini -r without value before a flag" gemini 'gemini|-r|-m|pro|q' gemini -m pro --resume "$NEW"
+check "gemini booleans kept" gemini 'gemini|--sandbox|--debug|--screen-reader|q' gemini --sandbox --debug --screen-reader --resume "$NEW"
 check "gemini drops --session-file value" gemini 'gemini|--session-file|f.json|-m|x' gemini -m x --resume "$NEW"
 check "gemini drops --session-file=x" gemini 'gemini|--session-file=f.json|-m|x' gemini -m x --resume "$NEW"
 check "gemini -- drops rest" gemini 'gemini|-m|x|--|q' gemini -m x --resume "$NEW"
@@ -115,8 +123,48 @@ resume_words claude /w /w 99999999 claude --name a
 expect_eq "missing parent: no prefix" "[claude][--name][a][--resume][$NEW]" "$(printf '[%s]' "${words[@]}")"
 resume_words claude /w /w - claude --name a
 expect_eq "parent '-': no prefix" "[claude][--name][a][--resume][$NEW]" "$(printf '[%s]' "${words[@]}")"
-kill $p1 $p2 $p3 $p4 $p5 2>/dev/null || true
+p7=$(mk_parent assign "env A=1 -u B C=x/y:z claude --name a")
+p8=$(mk_parent quoted "env A=a\\ b claude --name a")
+p9=$(mk_parent envopt "env -i A=1 claude --name a")
+p10=$(mk_parent subst "env A=\$(id) claude --name a")
+sleep 0.3
+resume_words claude /w /w "$p7" claude --name a
+expect_eq "launcher env assignments and -u kept in order" "[env][A=1][-u][B][C=x/y:z][claude][--name][a][--resume][$NEW]" "$(printf '[%s]' "${words[@]}")"
+for pair in "$p8:A=a\\" "$p9:-i" "$p10:A=\$(id)"; do
+  printf '%s\0' claude --name a > "$AF"
+  rc=0; out=$(ar_resume_cmd claude "$AF" "$NEW" /w /w "${pair%%:*}") || rc=$?
+  expect_eq "launcher env word not understood: ${pair#*:}" "3 unknown launcher word ${pair#*:}" "$rc $out"
+done
+kill $p1 $p2 $p3 $p4 $p5 $p7 $p8 $p9 $p10 2>/dev/null || true
 pkill -f "$WORK/run/par-" 2>/dev/null || true
+
+# --- swarm lieutenant: the launcher `swarm delegate` writes, read back from a
+# real process. The arguments below are delegate.sh's exact shape (keep in sync
+# with the swarm_write_launcher call in lib/swarm/delegate.sh).
+mkdir -p "$WORK/lt/run" "$WORK/lt/dir" "$WORK/lt/bin"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$WORK/lt/bin/claude"; chmod +x "$WORK/lt/bin/claude"
+printf 'be a lieutenant\n' > "$WORK/lt/run/prompt.md"
+lt_msg="Task brief from proj-main:"$'\n\n'"- don't \"quote\" \$me; it's fine"
+bash -c 'source "$1/lib/swarm/config.sh"; source "$1/lib/swarm/agents.sh"
+  run="$2"; dir="$3"; project=proj; name=fix; model=opus; first_msg="$4"
+  swarm_write_launcher "$run/launch.sh" "$dir" \
+    env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --name "${project}-${name}" \
+    --teammate-mode tmux --model "$model" --settings "$(swarm_settings_json 0)" \
+    --append-system-prompt-file "$run/prompt.md" "$first_msg"' _ \
+  "$T_REPO" "$WORK/lt/run" "$WORK/lt/dir" "$lt_msg"
+PATH="$WORK/lt/bin:$PATH" bash "$WORK/lt/run/launch.sh" >/dev/null 2>&1 &
+lt_launcher=$!
+lt_child() { pgrep -P "$lt_launcher" >/dev/null; }
+t_wait 5 lt_child
+lt_pid=$(pgrep -P "$lt_launcher" | head -1)
+lt_settings=$(bash -c 'source "$1/lib/swarm/config.sh"; source "$1/lib/swarm/agents.sh"; swarm_settings_json 0' _ "$T_REPO")
+ar_argv "$lt_pid" "$AF"
+CMD=$(ar_resume_cmd claude "$AF" "$NEW" "$WORK/lt/dir" "$WORK/lt/dir" "$lt_launcher")
+words=(); eval "words=($CMD)"
+expect_eq "lieutenant: exact resume words" \
+  "[env][CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1][claude][--name][proj-fix][--teammate-mode][tmux][--model][opus][--settings][$lt_settings][--append-system-prompt-file][$WORK/lt/run/prompt.md][--resume][$NEW]" \
+  "$(printf '[%s]' "${words[@]}")"
+{ kill "$lt_pid" "$lt_launcher"; wait "$lt_launcher"; } 2>/dev/null || true
 
 # --- cwd ---
 resume_words claude "/a b" /c - claude --name x
@@ -130,6 +178,20 @@ sleep 0.2
 resume_words claude "/a b" /c "$p6" claude --name x
 expect_eq "cd then env" "cd /a\\ b && env -u Z claude --name x --resume $NEW" "$CMD"
 kill $p6 2>/dev/null || true
+
+# --- unknown flags: no command (rc 3, reason on stdout) ---
+unknown() {  # unknown <name> <type> <want reason> <argv...>
+  local name="$1" type="$2" want="$3" rc=0 out; shift 3
+  printf '%s\0' "$@" > "$AF"
+  out=$(ar_resume_cmd "$type" "$AF" "$NEW" /w /w -) || rc=$?
+  expect_eq "$name" "3 $want" "$rc $out"
+}
+unknown "claude unknown flag" claude "unknown flag --frobnicate" claude --model m --frobnicate x
+unknown "claude unknown --flag=value" claude "unknown flag --frobnicate" claude --frobnicate=x
+unknown "claude unknown short flag" claude "unknown flag -z" claude -z
+unknown "claude attached short value" claude "unknown flag -nfoo" claude -nfoo
+unknown "codex unknown flag" codex "unknown flag --full-auto" codex --full-auto
+unknown "gemini unknown flag" gemini "unknown flag --nope" gemini --nope
 
 # --- failures ---
 expect "unreadable argv fails" 1 "" ar_resume_cmd claude "$WORK/nonexistent" "$NEW" /w /w -
