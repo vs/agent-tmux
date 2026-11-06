@@ -145,6 +145,28 @@ expect_eq "discover survives vanished agent (rc)" 0 "$vrc"
 expect_eq "vanished agent yields no record" 0 "$(awk -F'\t' '$6 == 99999' "$WORK/dv.out" | wc -l | tr -d ' ')"
 source lib/agents-restart/discover.sh
 
+# --- argv without python3, or with a failing python3: agents are still listed,
+# marked approximate (field 13 = 0)
+NOPY="$WORK/nopy"; mkdir -p "$NOPY"
+IFS=: read -r -a pdirs <<<"$PATH"
+for d in "${pdirs[@]}"; do [[ -d "$d" ]] && ln -s "$d"/* "$NOPY"/ 2>/dev/null || true; done
+rm -f "$NOPY"/python3*
+expect_eq "no python3 on the stripped PATH" "" "$(PATH="$NOPY" command -v python3 || true)"
+out5=$(PATH="$NOPY" ar_discover "$WORK/d5")
+r5=$(echo "$out5" | awk -F'\t' '$4 == "pa"')
+expect_eq "no python3: agent still listed" claude "$(f "$r5" 5)"
+expect_eq "no python3: argv approximate" 0 "$(f "$r5" 13)"
+expect_eq "no python3: ps-split argv written" "$WORK/installs/claude/1.0.0/claude" "$(tr '\0' '\n' < "$(f "$r5" 11)" | sed -n 2p)"
+expect_eq "no python3: same agent count" "$(echo "$out" | wc -l | tr -d ' ')" "$(echo "$out5" | awk -F'\t' '$4 ~ /^p[abd]$/' | wc -l | tr -d ' ')"
+mkdir -p "$WORK/badpy"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/badpy/python3"; chmod +x "$WORK/badpy/python3"
+out6=$(PATH="$WORK/badpy:$PATH" ar_discover "$WORK/d6")
+r6=$(echo "$out6" | awk -F'\t' '$4 == "pa"')
+expect_eq "failing python3: agent still listed" claude "$(f "$r6" 5)"
+expect_eq "failing python3: argv approximate" 0 "$(f "$r6" 13)"
+expect_eq "failing python3: no agent dropped" 3 "$(echo "$out6" | awk -F'\t' '$4 ~ /^p[abd]$/' | wc -l | tr -d ' ')"
+expect "argv of a gone process: 1" 1 "" ar_argv 99999999 "$WORK/gone.argv"
+
 # --- two servers: the same pane id on each, a different agent in each
 S2="ar-test2-$$"
 SP1=$(t_tmux list-sessions -F '#{socket_path}' | head -1)

@@ -76,7 +76,7 @@ _ar_quit_and_type() {
 #   ok<TAB><new_sid or ->
 #   fail<TAB><reason><TAB><resume_cmd or ->
 # <record> is the ar_discover TSV; <sid> the session id from ar_session_id.
-# Steps: precheck (sid known, argv readable, every flag known so the resume
+# Steps: precheck (sid known, argv read exactly, every flag known so the resume
 # command is built, ar_state is
 # exactly idle) -> /exit or /quit -> wait for the agent to be gone and the
 # shell to own the foreground -> type the resume command -> wait for a new agent
@@ -105,6 +105,9 @@ ar_restart_one() {
   if [[ -z "$sid" || "$sid" == - ]]; then _ar_fail "no session id"; return 0; fi
   if [[ ! "$pid" =~ ^[0-9]+$ ]]; then echo "agents-restart: bad agent pid '$pid'" >&2; _ar_fail "state changed"; return 0; fi
   if [[ -z "$argf" || "$argf" == - || ! -r "$argf" ]]; then _ar_fail "can't read arguments"; return 0; fi
+  # a whitespace-split argv (no python3, or its helper failed) may have split
+  # or joined arguments: never build a resume command from it
+  if [[ "$exact" != 1 ]]; then _ar_fail "can't read exact arguments"; return 0; fi
   rc=0; cmd=$(ar_resume_cmd "$type" "$argf" "$sid" "$acwd" "$scwd" "$parent") || rc=$?
   if [[ $rc == 3 && -n "$cmd" ]]; then
     echo "agents-restart: $pane: $cmd; nothing sent" >&2

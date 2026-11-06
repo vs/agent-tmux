@@ -43,16 +43,25 @@ ar_tmux() {
 }
 
 # ar_argv <pid> <outfile> -> NUL-separated argv in <outfile>.
-# Returns 0 exact, 2 approximate (no python3: whitespace split), 1 gone.
+# Returns 0 exact; 1 when the process is gone; 2 approximate: python3 is
+# missing or its helper failed (e.g. the macOS developer-tools stub), so the
+# `ps` args are split on whitespace (the file is empty when even ps can't read
+# them). A live agent is never reported as gone: callers list it and refuse
+# to build a resume command from an approximate argv.
 ar_argv() {
-  local pid="$1" out="$2" args
-  if command -v python3 >/dev/null 2>&1; then
-    python3 "$_AR_LIB_DIR/../../bin/agents-restart-argv" "$pid" > "$out" 2>/dev/null || return 1
+  local pid="$1" out="$2" args st w=()
+  if command -v python3 >/dev/null 2>&1 &&
+     python3 "$_AR_LIB_DIR/../../bin/agents-restart-argv" "$pid" > "$out" 2>/dev/null; then
     return 0
   fi
-  args=$(ps -o args= -p "$pid" 2>/dev/null) || return 1
-  [[ -n "$args" ]] || return 1
-  # shellcheck disable=SC2086
-  printf '%s\0' $args > "$out"
+  kill -0 "$pid" 2>/dev/null || return 1
+  args=$(ps -o args= -p "$pid" 2>/dev/null </dev/null) || args=""
+  if [[ -z "$args" ]]; then
+    st=$(ps -o stat= -p "$pid" 2>/dev/null </dev/null | tr -d ' ') || st=""
+    [[ "$st" != Z* ]] || return 1   # a zombie has exited
+  fi
+  : > "$out"
+  read -r -a w <<<"$args" || true
+  [[ ${#w[@]} -eq 0 ]] || printf '%s\0' "${w[@]}" > "$out"
   return 2
 }

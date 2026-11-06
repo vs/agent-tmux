@@ -354,6 +354,21 @@ w=$(live_width "$WORK/fw.out")
 if [[ -n "$w" && "$w" -lt 50 ]]; then t_pass "narrow: long names fit 50 columns ($w)"; else t_fail "narrow: long names fit 50 columns" "widest: ${w:-none}
 $(strip "$WORK/fw.out")"; fi
 
+# ---- python3 helper failing: agent listed, fails safely -------------------------------------
+fresh
+PX=$(spawn exa "$OLD")
+t_setscreen "$PX" "$T_CLAUDE_IDLE"
+sleep 0.5
+mkdir -p "$WORK/badpy"
+printf '#!/bin/sh\nexit 1\n' > "$WORK/badpy/python3"; chmod +x "$WORK/badpy/python3"
+CODE=0
+OUT=$(NO_COLOR=1 PATH="$WORK/badpy:$PATH" agents-restart -y 2>"$WORK/err") || CODE=$?
+expect_eq "bad python: exit 1" 1 "$CODE"
+has "bad python: agent listed in the plan" "^  [^ ]+ +exa +claude +1\.0\.0 → 2\.0\.0"
+has "bad python: failed safely" "^✗ .*exa +claude +failed: can't read exact arguments"
+expect_eq "bad python: agent alive" 0 "$(alive "$PX"; echo $?)"
+expect_eq "bad python: no quit sent" "" "$(quits)"
+
 # ---- diagnostics kept when something failed ------------------------------------------------
 fresh
 PH=$(spawn hng "$OLD")

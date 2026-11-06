@@ -143,6 +143,7 @@ _ar_plan() {
     if ! ar_outdated "$rv" "$iv"; then AR_UPTODATE=$((AR_UPTODATE + 1)); continue; fi
     A_REC[j]="$rec"; A_SOCK[j]="$sock"; A_PANE[j]="$pane"; A_ADDR[j]="$addr"; A_FOLDER[j]="$folder"
     A_TYPE[j]="$type"; A_PID[j]="$pid"; A_RV[j]="$rv"; A_IV[j]="$iv"; A_ACWD[j]="$acwd"; A_ARGF[j]="$argf"
+    A_EXACT[j]="$exact"
     A_UNREC[j]=0; A_PEND[j]=0
     [[ "$type" != claude ]] || AR_HAS_CLAUDE=1
     j=$((j + 1))
@@ -217,6 +218,9 @@ _ar_start_rows() {
       teammate) _ar_finish "$j" skip "skipped: teammate" ;;
       unlisted) _ar_finish "$j" fail "failed: not listed by claude agents" ;;
       *)
+        if [[ "${A_EXACT[j]}" != 1 ]]; then
+          _ar_finish "$j" fail "failed: can't read exact arguments"; continue
+        fi
         A_PEND[j]=1
         A_WAIT[j]=$(_ar_wait_text "${A_PLAN[j]}")
         ar_ui_set "${A_ROW[j]}" spin "${A_WAIT[j]}" "$AR_T0" ;;
@@ -255,7 +259,7 @@ ar_main() {
   AR_WD=$(mktemp -d "${TMPDIR:-/tmp}/agents-restart.XXXXXX")
   AR_JOB=""
   trap _ar_cleanup EXIT
-  A_REC=(); A_ROW=(); A_PEND=(); AR_N_OK=0; AR_N_SKIP=0; AR_N_FAIL=0; AR_MANUAL=""; AR_INT=0
+  A_REC=(); A_ROW=(); A_PEND=(); A_EXACT=(); AR_N_OK=0; AR_N_SKIP=0; AR_N_FAIL=0; AR_MANUAL=""; AR_INT=0
 
   ar_discover "$AR_WD/argv" > "$AR_WD/agents.tsv"
   ar_ui_header

@@ -68,6 +68,14 @@ expect_eq "unknown flag: agent alive" 0 "$(alive "$P8"; echo $?)"
 expect_eq "unknown flag: nothing started" "$before" "$(loglines)"
 expect_eq "unknown flag: no quit sent" 0 "$({ cat "$WORK/quits.log" 2>/dev/null || true; } | grep -c "^$P8" || true)"
 
+# approximate argv (no python3 / helper failed): nothing sent
+approx=$(echo "$R8" | awk -F'\t' 'BEGIN { OFS = "\t" } { $13 = 0; print }')
+out=$(ar_restart_one "$approx" "fake-$P8" 2>/dev/null)
+expect_eq "approximate argv: result" $'fail\tcan\'t read exact arguments\t-' "$out"
+sleep 1
+expect_eq "approximate argv: agent alive" 0 "$(alive "$P8"; echo $?)"
+expect_eq "approximate argv: nothing started" "$before" "$(loglines)"
+
 # not idle: unsent draft
 setscreen "$(fld "$R1" 6)" "$(printf '%s\n❯ half typed\n%s\n  footer\n' "$RULE" "$RULE")"
 sleep 1
