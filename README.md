@@ -15,6 +15,7 @@ talk to each other, and ask Codex for a review with one command.
 | `bin/agents-restart` | CLI that restarts upgraded Claude, Codex and Gemini agents in their tmux panes, resuming the same conversation. |
 | `bin/agents-restart-argv` | Python helper for `agents-restart` that prints a process's exact argv (NUL-separated), so arguments with spaces or quotes survive into the resume command. |
 | `lib/agents-restart/` | Shell modules behind `agents-restart` (discovery, state, session ids, restart flow, live UI). |
+| `raycast/agents-restart.sh` | Raycast script command, **Restart Agents**: runs `agents-restart -y` and shows its colored output. |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
 | `.claude-plugin/` | Makes the repo a Claude Code plugin and its own marketplace. |
@@ -108,6 +109,12 @@ Gemini support was built from the Gemini 0.67 source and hasn't yet been checked
 Claude's vim mode isn't detected: a Claude left in vim NORMAL mode reads `/exit` as vim keys, so it may not quit, or may leave stray text in its input box.
 
 Output is plain (no colors, spinners or redraws) when stdout isn't a terminal or `NO_COLOR` is set. `CLICOLOR_FORCE=1` keeps the colors without a terminal, still with no redraws.
+
+### From Raycast
+
+`raycast/agents-restart.sh` is a Raycast script command, **Restart Agents**, that runs `agents-restart -y` and shows its output, in color, in Raycast's full-output view. To add it, open Raycast Settings → Script Commands → Add Script Directory and choose this repo's `raycast/` folder (if the command doesn't show up, run Reload Script Directories). Rows appear as each agent finishes; there are no live spinners. Closing the view stops waiting for busy agents; a restart already under way still completes.
+
+The script sets up `PATH` itself (Raycast starts scripts with a bare one): `~/.local/bin`, Homebrew, and mise's tools via `mise env`, so it finds the same `claude`, `codex` and `gemini` as your shell.
 
 ## /agent-tmux:codex-review
 

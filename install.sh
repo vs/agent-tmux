@@ -139,3 +139,4 @@ else
 fi
 
 info "done. Restart running Codex sessions to pick up the skill and rule."
+info "Raycast: add $REPO/raycast under Settings → Script Commands → Add Script Directory for a Restart Agents command."
