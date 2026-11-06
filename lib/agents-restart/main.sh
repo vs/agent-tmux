@@ -101,7 +101,15 @@ _ar_restart() {
       _ar_finish "$j" fail "failed: $reason" "$t0"
       [[ "${cmd:--}" == - ]] || _ar_manual "$j" "$cmd" ;;
     *)
-      _ar_finish "$j" fail "failed: restart aborted" "$t0" ;;
+      # the job died without a result (killed outright): the agent may have
+      # quit, so build its resume command here
+      _ar_finish "$j" fail "failed: restart aborted" "$t0"
+      cmd=""
+      if [[ "${sid:--}" != - ]]; then
+        cmd=$(ar_resume_cmd "${A_TYPE[j]}" "${A_ARGF[j]}" "$sid" "${A_ACWD[j]}" \
+          "$(echo "${A_REC[j]}" | cut -f10)" "$(echo "${A_REC[j]}" | cut -f12)" 2>/dev/null) || cmd=""
+      fi
+      [[ -z "$cmd" ]] || _ar_manual "$j" "$cmd   (if it isn't running)" ;;
   esac
 }
 

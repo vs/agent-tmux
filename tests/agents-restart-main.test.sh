@@ -354,6 +354,26 @@ w=$(live_width "$WORK/fw.out")
 if [[ -n "$w" && "$w" -lt 50 ]]; then t_pass "narrow: long names fit 50 columns ($w)"; else t_fail "narrow: long names fit 50 columns" "widest: ${w:-none}
 $(strip "$WORK/fw.out")"; fi
 
+# ---- restart job killed outright: "restart aborted" still lists the resume command -------
+fresh
+PK=$(spawn abort "$OLD")
+t_tmux send-keys -t abort SLOW Enter
+sleep 0.3
+t_setscreen "$PK" "$T_CLAUDE_IDLE"
+sleep 0.5
+NO_COLOR=1 agents-restart -y > "$WORK/abort.out" 2>"$WORK/err" &
+ipid=$!
+t_wait 30 grep -q "^$PK"$'\t' "$WORK/quits.log" || true
+for c in $(pgrep -P "$ipid"); do
+  ps -o args= -p "$c" 2>/dev/null | grep -q agents-restart && kill -9 "$c" 2>/dev/null || true
+done
+CODE=0; wait "$ipid" 2>/dev/null || CODE=$?
+OUT=$(cat "$WORK/abort.out")
+expect_eq "aborted: exit 1" 1 "$CODE"
+has "aborted: failed line" "^✗ .*abort +claude +failed: restart aborted"
+has "aborted: resume command listed" "^resume by hand:$"
+has "aborted: the agent's resume command" "^  +[^ ]+ +claude --resume fake-$PK   \(if it isn't running\)$"
+
 # ---- python3 helper failing: agent listed, fails safely -------------------------------------
 fresh
 PX=$(spawn exa "$OLD")
