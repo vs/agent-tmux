@@ -12,6 +12,9 @@ talk to each other, and ask Codex for a review with one command.
 | `bin/swarm-iterm.py` | iTerm2 Python API helper: places tabs and detects the hotkey window. |
 | `lib/swarm/` | Shell modules behind `swarm` (config, open, delegate, layout, status, watch). |
 | `skills/swarm` | Claude Code skill that teaches an orchestrator to use `swarm delegate`. |
+| `bin/agents-restart` | CLI that restarts upgraded Claude, Codex and Gemini agents in their tmux panes, resuming the same conversation. |
+| `bin/agents-restart-argv` | Helper that works out how to resume an agent from its command line. |
+| `lib/agents-restart/` | Shell modules behind `agents-restart` (discovery, state, session ids, restart flow, live UI). |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
 | `.claude-plugin/` | Makes the repo a Claude Code plugin and its own marketplace. |
@@ -39,6 +42,7 @@ It needs `tmux` (3.2+) and `jq`, and:
 - removes `~/.claude/skills/{smux,codex-review}` links left by earlier versions, which would duplicate the plugin's skills;
 - adds `source-file <repo>/config/tmux.conf` to `~/.tmux.conf`;
 - links `bin/swarm` into `~/.local/bin` and copies `config/swarm.conf.example` to `~/.agent-tmux/swarm.conf` if you have none (never overwritten);
+- links `bin/agents-restart` into `~/.local/bin`;
 - creates `~/.agent-tmux/venv` with the `iterm2` package for tab placement (a failure only warns; `AGENT_TMUX_SKIP_VENV=1` skips it);
 - allows `Bash(tmux-bridge:*)` and `Bash(swarm <open|delegate|status|peek|report|watch|layout|config>:*)` in `~/.claude/settings.json`, but not `swarm close`, so killing a running lieutenant always asks;
 - adds `prefix_rule(pattern=["tmux-bridge"], decision="allow")` to `~/.codex/rules/default.rules`, so Codex runs `tmux-bridge` without asking and outside its sandbox (which can't reach the tmux socket).
@@ -79,6 +83,25 @@ swarm close <lt>      # stop a lieutenant and close its tab
 The orchestrator delegates with `swarm delegate`, through the `swarm` skill: it starts a lieutenant in the project directory, in its own tab, and the lieutenant answers with `swarm report`. `swarm help` lists every command.
 
 A helper's permission prompt shows up in its lieutenant's pane, not the helper's. After updating the plugin from GitHub (`claude plugin update agent-tmux@agent-tmux`), new sessions get the `swarm` skill.
+
+## Restarting agents after an upgrade
+
+`agents-restart` finds the Claude, Codex and Gemini agents running in your tmux panes, and restarts only those older than the installed CLI. Each agent quits and resumes in place, in the same pane and the same conversation.
+
+```sh
+agents-restart            # list outdated agents, ask, then restart them
+agents-restart -y         # skip the confirmation
+agents-restart --dry-run  # only list what it would do; changes nothing
+agents-restart -h         # usage
+```
+
+Busy agents, background work included, are waited for; press Ctrl+C to stop waiting. It looks at the default tmux server and the one in `$SWARM_TMUX_SOCKET`.
+
+Skipped (nothing is touched): an agent at a permission prompt or with unsent input, teammate panes, panes whose screen it doesn't recognize, a CLI that isn't installed, an agent that exited while it waited, and the pane you run it from (its resume command is printed instead).
+
+Failed (the agent keeps running and nothing is typed): no session id (for example two Codex or Gemini sessions in the same folder, `codex resume --last`, or `codex -C`), a Claude agent missing from `claude agents`, or a pane with no shell to return to. If a failure comes after the agent quit, a resume command is printed for you to paste. When anything failed, the path of a diagnostics log is printed.
+
+Gemini support was built from the Gemini 0.67 source and hasn't yet been checked against a live signed-in Gemini.
 
 ## /agent-tmux:codex-review
 
