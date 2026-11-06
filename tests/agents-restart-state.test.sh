@@ -233,6 +233,7 @@ expect_eq "gemini no box below prompt" unrecognized "$(sst gemini "$(printf '%s\
 # --- ar_state end to end for codex (screen read through tmux) ---
 t_install_fake codex 0.166.0; t_use_version codex 0.166.0
 t_install_fake gemini 0.67.0; t_use_version gemini 0.67.0
+export CODEX_HOME="$WORK/codex" AGENTS_RESTART_STABLE_DELAY=0.6 AGENTS_RESTART_QUIET_SECS=2
 real() { (cd "$1" && pwd -P); }
 pane_agent() { ar_ps_snapshot; ar_agent_in_pane "$(t_tmux display-message -p -t "$1" '#{pane_pid}')" | cut -f1; }
 started() { [ -n "$(pane_agent "$1")" ]; }
@@ -243,20 +244,53 @@ start() {
   t_wait 10 started "$1" || { echo "agent in $1 did not start" >&2; return 1; }
   pane_agent "$1"
 }
-mkdir -p "$WORK/c0"
+# touch_at <epoch> <file...>: set mtime.
+touch_at() { local ep="$1"; shift; touch -t "$(date -r "$ep" +%Y%m%d%H%M.%S)" "$@"; }
+# mkroll <epoch> <uuid> <cwd> [jq filter]: rollout as Codex names it, last written at <epoch>.
+mkroll() {
+  local ep="$1" id="$2" cwd="$3" f="${4:-.}" ts d iso out
+  ts=$(date -r "$ep" +%Y-%m-%dT%H-%M-%S); d=$(date -r "$ep" +%Y/%m/%d)
+  iso=$(date -u -r "$ep" +%Y-%m-%dT%H:%M:%S.176Z)
+  mkdir -p "$CODEX_HOME/sessions/$d"; out="$CODEX_HOME/sessions/$d/rollout-$ts-$id.jsonl"
+  jq -nc --arg id "$id" --arg ts "$iso" --arg cwd "$cwd" \
+    '{timestamp: $ts, type: "session_meta", payload: {id: $id, timestamp: $ts, cwd: $cwd, originator: "codex-tui", source: "cli", thread_source: "user"}}' |
+    jq -c "$f" > "$out"
+  echo '{"type":"turn_context"}' >> "$out"
+  touch_at "$ep" "$out"
+}
+rollf() { find "$CODEX_HOME/sessions" -name "*$1*"; }
+rmroll() { find "$CODEX_HOME/sessions" -name "*$1*" -exec rm -f {} +; }
+mkdir -p "$WORK/c0" "$CODEX_HOME/sessions"
 t_session s2 "$WORK/c0"
-CP0=$(start s2:1 "$WORK/c0" "codex")
+CP0=$(start s2:1 "$WORK/c0" "codex"); SP0=$(_ar_start_epoch "$CP0"); D0=$(real "$WORK/c0")
+cst() { ar_state codex "$SWARM_TMUX_SOCKET" s2:1 "$CP0" /dev/null; }
 setscreen "$CP0" "$(fx codex-busy)"
 cscreen_has() { ar_screen "$SWARM_TMUX_SOCKET" s2:1 | grep -q "$1"; }
-t_wait 5 cscreen_has "Working" || echo "codex screen not drawn"
-expect_eq "ar_state codex busy" busy "$(ar_state codex "$SWARM_TMUX_SOCKET" s2:1 "$CP0" /dev/null)"
-setscreen "$CP0" "$(fx codex-idle)"
 cscreen_lacks() { ! cscreen_has "$1"; }
+t_wait 5 cscreen_has "Working" || echo "codex screen not drawn"
+expect_eq "ar_state codex busy" busy "$(cst)"
+setscreen "$CP0" "$(fx codex-idle)"
 t_wait 5 cscreen_lacks "Working" || echo "codex screen not drawn"
-expect_eq "ar_state codex idle" idle "$(ar_state codex "$SWARM_TMUX_SOCKET" s2:1 "$CP0" /dev/null)"
+expect_eq "ar_state codex idle (stable, no session file)" idle "$(cst)"
+# R14: a screen that keeps changing is not idle.
+( for i in $(seq 1 25); do printf '%s\n%s' "• tick $i" "$(fx codex-idle)" > "$WORK/screen/$CP0"; sleep 0.15; done ) &
+TICK=$!; disown
+t_wait 5 cscreen_has "tick" || echo "ticking screen not drawn"
+expect_eq "ar_state codex changing screen" busy:active "$(cst)"
+kill "$TICK" 2>/dev/null || true
+setscreen "$CP0" "$(fx codex-idle)"
+t_wait 5 cscreen_lacks "tick" || echo "codex screen not redrawn"
+# R14: a session file written within the quiet window is not idle.
+U0=01a1adff-8398-72b1-b333-af3dfa74fe00
+mkroll "$(date +%s)" "$U0" "$D0"
+expect_eq "ar_state codex session file just written" busy:active "$(cst)"
+touch_at "$SP0" "$(rollf "$U0")"
+quiet() { [ $(( $(date +%s) - SP0 )) -ge 3 ]; }
+t_wait 10 quiet
+expect_eq "ar_state codex quiet and stable" idle "$(cst)"
+expect_eq "codex session id of that agent" "$U0" "$(ar_session_id codex "$CP0" "$D0")"
 
 # --- ar_session_id codex: rollout held open ---
-export CODEX_HOME="$WORK/codex"
 ROLL="$CODEX_HOME/sessions/2026/11/05/rollout-2026-11-05T10-00-00-019b8601-9767-7a90-86f1-d14b21a74e7e.jsonl"
 mkdir -p "$(dirname "$ROLL")" "$WORK/elsewhere"
 bash -c 'exec 3>"$1"; sleep 30' _ "$ROLL" & HOLD=$!; disown
@@ -266,40 +300,35 @@ t_wait 5 holding "$HOLD"; t_wait 5 holding "$HOLD2"
 expect_eq "codex session id from open rollout" 019b8601-9767-7a90-86f1-d14b21a74e7e "$(ar_session_id codex "$HOLD" /x)"
 expect_eq "codex rollout outside codex home ignored" - "$(ar_session_id codex "$HOLD2" /x)"
 kill "$HOLD" "$HOLD2" 2>/dev/null || true
+rm -f "$ROLL"
 
-# --- ar_session_id codex: rollouts by cwd and start time (shared app-server daemon) ---
-# mkroll <epoch> <uuid> <cwd> [jq filter]: rollout as Codex names it (local time).
-mkroll() {
-  local ep="$1" id="$2" cwd="$3" f="${4:-.}" ts d iso
-  ts=$(date -r "$ep" +%Y-%m-%dT%H-%M-%S); d=$(date -r "$ep" +%Y/%m/%d)
-  iso=$(date -u -r "$ep" +%Y-%m-%dT%H:%M:%S.176Z)
-  mkdir -p "$CODEX_HOME/sessions/$d"
-  jq -nc --arg id "$id" --arg ts "$iso" --arg cwd "$cwd" \
-    '{timestamp: $ts, type: "session_meta", payload: {id: $id, timestamp: $ts, cwd: $cwd, originator: "codex-tui", source: "cli", thread_source: "user"}}' |
-    jq -c "$f" > "$CODEX_HOME/sessions/$d/rollout-$ts-$id.jsonl"
-  echo '{"type":"turn_context"}' >> "$CODEX_HOME/sessions/$d/rollout-$ts-$id.jsonl"
-}
-rmroll() { find "$CODEX_HOME/sessions" -name "*$1*" -exec rm -f {} +; }
+# --- ar_session_id codex: rollouts by cwd and mtime (shared app-server daemon) ---
 U1=01a1adff-8398-72b1-b333-af3dfa74feb1; U2=01a1adff-8398-72b1-b333-af3dfa74feb2
 U3=01a1adff-8398-72b1-b333-af3dfa74feb3; U5=01a1adff-8398-72b1-b333-af3dfa74feb5
-U6=01a1adff-8398-72b1-b333-af3dfa74feb6; U9=01a1adff-8398-72b1-b333-af3dfa74feb9
-mkdir -p "$WORK/c1" "$WORK/c2" "$WORK/c3"
-D1=$(real "$WORK/c1"); D2=$(real "$WORK/c2"); D3=$(real "$WORK/c3")
+U6=01a1adff-8398-72b1-b333-af3dfa74feb6; U7=01a1adff-8398-72b1-b333-af3dfa74feb7
+U8=01a1adff-8398-72b1-b333-af3dfa74feb8; U9=01a1adff-8398-72b1-b333-af3dfa74feb9
+mkdir -p "$WORK/c1" "$WORK/c2" "$WORK/c3" "$WORK/c4" "$WORK/c5"
+D1=$(real "$WORK/c1"); D2=$(real "$WORK/c2"); D3=$(real "$WORK/c3"); D4=$(real "$WORK/c4"); D5=$(real "$WORK/c5")
 CA=$(start s2:2 "$D1" "codex")
 SA=$(_ar_start_epoch "$CA")
 expect_eq "codex no rollout yet" - "$(ar_session_id codex "$CA" "$D1")"
 mkroll "$SA" "$U1" "$D1"
-expect_eq "codex rollout created since start" "$U1" "$(ar_session_id codex "$CA" "$D1")"
+expect_eq "codex rollout written since start" "$U1" "$(ar_session_id codex "$CA" "$D1")"
 mkroll $((SA - 50)) "$U9" "$D1"
 mkroll $((SA + 3)) "$U2" "$D2"
 mkroll $((SA + 4)) "$U3" "$D1" '.payload.thread_source = "subagent"'
 mkroll $((SA + 4)) "$U5" "$D1" '.payload.source = "exec"'
 mkroll $((SA + 4)) "$U6" "$D1" '.payload.source = {"subagent": "x"}'
-expect_eq "codex ignores older, other-cwd, subagent and exec rollouts" "$U1" "$(ar_session_id codex "$CA" "$D1")"
-rmroll "$U3"; rmroll "$U5"; rmroll "$U6"
+mkroll $((SA + 4)) "$U7" "$D1" '.payload.originator = "codex_vscode"'
+expect_eq "codex ignores older, other-cwd, subagent, exec and non-TUI rollouts" "$U1" "$(ar_session_id codex "$CA" "$D1")"
+rmroll "$U3"; rmroll "$U5"; rmroll "$U6"; rmroll "$U7"
 mkroll $((SA + 5)) "$U3" "$D1"
 expect_eq "codex two rollouts since start is ambiguous" - "$(ar_session_id codex "$CA" "$D1")"
 rmroll "$U3"
+touch_at $((SA + 6)) "$(rollf "$U9")"
+expect_eq "codex older rollout written since start (in-app /resume) is ambiguous" - "$(ar_session_id codex "$CA" "$D1")"
+touch_at $((SA - 50)) "$(rollf "$U9")"
+expect_eq "codex older rollout quiet again" "$U1" "$(ar_session_id codex "$CA" "$D1")"
 sleep 1.2
 CB=$(start s2:3 "$D1" "codex")
 SB=$(_ar_start_epoch "$CB")
@@ -308,23 +337,36 @@ expect_eq "codex younger peer without rollout" - "$(ar_session_id codex "$CB" "$
 mkroll "$SB" "$U3" "$D1"
 expect_eq "codex rollout after both starts is ambiguous (older)" - "$(ar_session_id codex "$CA" "$D1")"
 expect_eq "codex rollout after both starts is ambiguous (younger)" - "$(ar_session_id codex "$CB" "$D1")"
+touch_at $((SB + 2)) "$(rollf "$U1")"
+expect_eq "codex peer started before the last write is ambiguous" - "$(ar_session_id codex "$CA" "$D1")"
+rmroll "$U2"; mkroll $((SA - 900)) "$U2" "$D2"
 CC=$(start s2:4 "$D2" "codex -m o3 resume $U2")
 expect_eq "codex resumed by uuid" "$U2" "$(ar_session_id codex "$CC" "$D2")"
+touch_at "$(date +%s)" "$(rollf "$U2")"
+expect_eq "codex resumed by uuid, written since" "$U2" "$(ar_session_id codex "$CC" "$D2")"
+mkroll "$(_ar_start_epoch "$CC")" "$U8" "$D2"
+expect_eq "codex resumed A, also wrote B since start" - "$(ar_session_id codex "$CC" "$D2")"
 echo "{\"id\":\"$U6\",\"thread_name\":\"my thread\",\"updated_at\":\"2026-11-05T23:16:32Z\"}" >> "$CODEX_HOME/session_index.jsonl"
 mkroll $((SA - 500)) "$U6" "$D3"
 CD=$(start s2:5 "$D3" "codex resume 'my thread'")
 expect_eq "codex resumed by session name" "$U6" "$(ar_session_id codex "$CD" "$D3")"
-mkdir -p "$WORK/c4"; D4=$(real "$WORK/c4")
+echo "{\"id\":\"$U7\",\"thread_name\":\"my thread\",\"updated_at\":\"2026-11-05T23:17:32Z\"}" >> "$CODEX_HOME/session_index.jsonl"
+mkroll $((SA - 400)) "$U7" "$D3"
+expect_eq "codex duplicate session name" - "$(ar_session_id codex "$CD" "$D3")"
 CE=$(start s2:6 "$D4" "codex resume --last")
-expect_eq "codex resume --last is unknown" - "$(ar_session_id codex "$CE" "$D4")"
-CF=$(start s2:7 "$D4" "codex resume 01a1adff-0000-0000-0000-000000000000")
-expect_eq "codex resume of a missing session" - "$(ar_session_id codex "$CF" "$D4")"
+mkroll "$(date +%s)" "$U5" "$D4"
+expect_eq "codex resume --last with a sibling's rollout since start" - "$(ar_session_id codex "$CE" "$D4")"
+CF=$(start s2:7 "$D5" "codex resume 01a1adff-0000-0000-0000-000000000000")
+expect_eq "codex resume of a missing session" - "$(ar_session_id codex "$CF" "$D5")"
+CG=$(start s2:8 "$D5" "codex resume")
+expect_eq "codex resume picker" - "$(ar_session_id codex "$CG" "$D5")"
 
 # --- ar_session_id gemini ---
 GH="$HOME/.gemini"
 # gproj <dir> <slug>: register a project directory the way Gemini 0.67 does.
 gproj() { mkdir -p "$GH/tmp/$2/chats"; printf '%s' "$1" > "$GH/tmp/$2/.project_root"; }
-# mkgs <chats dir> <start epoch> <uuid> <resumable 0|1> [kind]: session file as Gemini names it.
+# mkgs <chats dir> <epoch> <uuid> <resumable 0|1> [kind]: session file as Gemini
+# names it, last written at <epoch>.
 mkgs() {
   local dir="$1" ep="$2" id="$3" res="$4" kind="${5:-main}" ts iso f
   ts=$(date -u -r "$ep" +%Y-%m-%dT%H-%M); iso=$(date -u -r "$ep" +%Y-%m-%dT%H:%M:%S.500Z)
@@ -337,30 +379,37 @@ mkgs() {
   else
     jq -nc --arg t "$iso" '{id: "m1", timestamp: $t, type: "user", content: [{text: "/help"}]}' >> "$f"
   fi
+  touch_at "$ep" "$f"
   echo "$f"
 }
-V1=7b0c1d2e-0000-4000-8000-000000000001; V2=7b0c1d2e-0000-4000-8000-000000000002
-V3=7b0c1d2e-0000-4000-8000-000000000003; V4=7b0c1d2e-0000-4000-8000-000000000004
-V5=7b0c1d2e-0000-4000-8000-000000000005; V6=7b0c1d2e-0000-4000-8000-000000000006
-V7=7b0c1d2e-0000-4000-8000-000000000007; V8=7b0c1d2e-0000-4000-8000-000000000008
-for i in 1 2 3 4 5 6 7 8; do mkdir -p "$WORK/g$i"; done
+V1=7b0c1d01-0000-4000-8000-000000000001; V2=7b0c1d02-0000-4000-8000-000000000002
+V3=7b0c1d03-0000-4000-8000-000000000003; V4=7b0c1d04-0000-4000-8000-000000000004
+V5=7b0c1d05-0000-4000-8000-000000000005; V6=7b0c1d06-0000-4000-8000-000000000006
+V7=7b0c1d07-0000-4000-8000-000000000007; V8=7b0c1d08-0000-4000-8000-000000000008
+V9=7b0c1d09-0000-4000-8000-000000000009
+for i in 1 2 3 4 5 6 7 8 9; do mkdir -p "$WORK/g$i"; done
 E1=$(real "$WORK/g1"); E2=$(real "$WORK/g2"); E3=$(real "$WORK/g3"); E4=$(real "$WORK/g4")
 E5=$(real "$WORK/g5"); E6=$(real "$WORK/g6"); E7=$(real "$WORK/g7"); E8=$(real "$WORK/g8")
+E9=$(real "$WORK/g9")
 t_session s3 "$E1"
 GA=$(start s3:1 "$E1" "gemini"); SGA=$(_ar_start_epoch "$GA")
 gproj "$E1" g1
-expect_eq "gemini no session file: latest" latest "$(ar_session_id gemini "$GA" "$E1")"
+expect_eq "gemini no session file" - "$(ar_session_id gemini "$GA" "$E1")"
 mkgs "$GH/tmp/g1/chats" $((SGA - 900)) "$V8" 1 >/dev/null
 mkgs "$GH/tmp/g1/chats" "$SGA" "$V1" 1 >/dev/null
 mkdir -p "$GH/tmp/g1/chats/$V1"; mkgs "$GH/tmp/g1/chats/$V1" $((SGA + 2)) "$V7" 1 subagent >/dev/null
-expect_eq "gemini session started since agent start" "$V1" "$(ar_session_id gemini "$GA" "$E1")"
+expect_eq "gemini session written since agent start" "$V1" "$(ar_session_id gemini "$GA" "$E1")"
+mkgs "$GH/tmp/g1/chats" $((SGA + 3)) "$V9" 1 >/dev/null
+expect_eq "gemini two sessions since start (never latest)" - "$(ar_session_id gemini "$GA" "$E1")"
 GB=$(start s3:2 "$E2" "gemini"); SGB=$(_ar_start_epoch "$GB")
 gproj "$E2" g2
 mkgs "$GH/tmp/g2/chats" $((SGB - 900)) "$V8" 1 >/dev/null
 mkgs "$GH/tmp/g2/chats" "$SGB" "$V2" 0 >/dev/null
 expect_eq "gemini own session not resumable yet" - "$(ar_session_id gemini "$GB" "$E2")"
+mkgs "$GH/tmp/g2/chats" $((SGB + 2)) "$V3" 1 >/dev/null
+expect_eq "gemini own empty session + dead sibling's resumable one" - "$(ar_session_id gemini "$GB" "$E2")"
 GC=$(start s3:3 "$E3" "gemini")
-expect_eq "gemini project unknown: latest" latest "$(ar_session_id gemini "$GC" "$E3")"
+expect_eq "gemini project unknown" - "$(ar_session_id gemini "$GC" "$E3")"
 GD=$(start s3:4 "$E4" "gemini"); SGD=$(_ar_start_epoch "$GD")
 H4=$(printf '%s' "$E4" | shasum -a 256 | cut -d' ' -f1); mkdir -p "$GH/tmp/$H4/chats"
 mkgs "$GH/tmp/$H4/chats" "$SGD" "$V4" 1 >/dev/null
@@ -371,25 +420,35 @@ mkgs "$GH/tmp/g5/chats" "$SGE" "$V5" 1 >/dev/null
 sleep 1.2
 GF=$(start s3:6 "$E5" "gemini")
 expect_eq "gemini older peer keeps its session" "$V5" "$(ar_session_id gemini "$GE" "$E5")"
-expect_eq "gemini younger peer: ambiguous" - "$(ar_session_id gemini "$GF" "$E5")"
+expect_eq "gemini younger peer without session" - "$(ar_session_id gemini "$GF" "$E5")"
 gproj "$E6" g6
-F6=$(mkgs "$GH/tmp/g6/chats" $((SGA - 3000)) "$V6" 1)
-mkgs "$GH/tmp/g6/chats" $((SGA - 2000)) "$V3" 1 >/dev/null
-touch -t "$(date -r $((SGA - 1000)) +%Y%m%d%H%M.%S)" "$GH/tmp/g6/chats/"*
+mkgs "$GH/tmp/g6/chats" $((SGA - 3000)) "$V6" 1 >/dev/null
 GG=$(start s3:7 "$E6" "gemini -r latest -m pro")
-touch "$F6"
-expect_eq "gemini -r latest: the session written since start" "$V6" "$(ar_session_id gemini "$GG" "$E6")"
+touch "$GH/tmp/g6/chats/"*
+expect_eq "gemini -r latest" - "$(ar_session_id gemini "$GG" "$E6")"
 gproj "$E7" g7
-mkgs "$GH/tmp/g7/chats" $((SGA - 3000)) "$V7" 1 >/dev/null
+F7=$(mkgs "$GH/tmp/g7/chats" $((SGA - 3000)) "$V7" 1)
 GI=$(start s3:8 "$E7" "gemini --resume $V7")
 expect_eq "gemini --resume uuid" "$V7" "$(ar_session_id gemini "$GI" "$E7")"
+touch "$F7"
+expect_eq "gemini --resume uuid, written since" "$V7" "$(ar_session_id gemini "$GI" "$E7")"
+GK=$(start s3:9 "$E7" "gemini --resume $V3")
+expect_eq "gemini --resume uuid not found" - "$(ar_session_id gemini "$GK" "$E7")"
 expect_eq "gemini vanished pid" - "$(ar_session_id gemini 999999 "$E7")"
 expect_eq "codex vanished pid" - "$(ar_session_id codex 999999 "$E7")"
 gproj "$E8" g8
-GJ=$(start s3:9 "$E8" "gemini"); SGJ=$(_ar_start_epoch "$GJ")
+GJ=$(start s3:10 "$E8" "gemini"); SGJ=$(_ar_start_epoch "$GJ")
 jq -n --arg id "$V8" --arg t "$(date -u -r "$SGJ" +%Y-%m-%dT%H:%M:%S.000Z)" \
   '{sessionId: $id, startTime: $t, lastUpdated: $t, messages: [{type: "user", content: "hi"}]}' \
   > "$GH/tmp/g8/chats/session-$(date -u -r "$SGJ" +%Y-%m-%dT%H-%M)-${V8:0:8}.json"
 expect_eq "gemini legacy .json session" "$V8" "$(ar_session_id gemini "$GJ" "$E8")"
+gproj "$E9" g9
+GL=$(start s3:11 "$E9" "gemini")
+echo 'not json' > "$GH/tmp/g9/chats/session-2026-11-05T10-00-0000000.jsonl"
+expect_eq "gemini unreadable session file since start" - "$(ar_session_id gemini "$GL" "$E9")"
+
+# Last: an unreadable rollout written since start makes every Codex lookup "-".
+mkdir -p "$CODEX_HOME/sessions/2026/11/09"; echo 'garbage' > "$CODEX_HOME/sessions/2026/11/09/rollout-x.jsonl"
+expect_eq "codex unreadable rollout since start" - "$(ar_session_id codex "$CP0" "$D0")"
 
 t_done

@@ -2,7 +2,8 @@
 # Sourced after common.sh and discover.sh; bash 3.2 compatible.
 #
 # ar_state <type> ...  and  ar_session_id <type> <pid> <agent_cwd>  dispatch per type;
-# each type's implementation lives in its own _ar_<type>_* functions.
+# each type's implementation lives in its own _ar_<type>_* functions. Codex and
+# Gemini session IDs are read in sessions.sh.
 
 # ---- Claude ----------------------------------------------------------------
 
@@ -345,13 +346,43 @@ _ar_screen_state() {
   if [[ -n "${r#ok	}" ]]; then echo unsent; else echo idle; fi
 }
 
+# _ar_plain <screen> -> the screen without escape sequences.
+_ar_plain() { printf '%s\n' "$1" | _ar_clean | cut -f2; }
+
+# _ar_cg_state <codex|gemini> <sock> <pane> <pid> -> _ar_screen_state, except
+# that a screen reading idle must also be quiet: the agent's session file (when
+# identified) unmodified for AGENTS_RESTART_QUIET_SECS (5) and a second capture
+# AGENTS_RESTART_STABLE_DELAY (1) s later showing the same text (spinners and
+# timers animate). Otherwise busy:active. The screen alone can't be trusted:
+# Gemini keeps its input box on screen while it generates.
+_ar_cg_state() {
+  local type="$1" sock="$2" pane="$3" pid="$4" screen st cwd sess file mt now
+  screen=$(ar_screen "$sock" "$pane")
+  st=$(_ar_screen_state "$type" "$screen")
+  if [[ "$st" != idle ]]; then echo "$st"; return; fi
+  cwd=$(_ar_lsof_field "$pid" cwd)
+  sess=$(_ar_"${type}"_session "$pid" "$cwd")
+  if [[ "$sess" == *$'\t'* ]]; then
+    file="${sess#*$'\t'}"
+    mt=$(_ar_mtime "$file") || { echo busy:active; return; }
+    now=$(date +%s)
+    if [[ $((now - mt)) -lt "${AGENTS_RESTART_QUIET_SECS:-5}" ]]; then echo busy:active; return; fi
+  fi
+  sleep "${AGENTS_RESTART_STABLE_DELAY:-1}"
+  if [[ "$(_ar_plain "$screen")" != "$(_ar_plain "$(ar_screen "$sock" "$pane")")" ]]; then
+    echo busy:active; return
+  fi
+  echo idle
+}
+
 # ---- Dispatch ----------------------------------------------------------------
 
 # ar_state <type> <sock> <pane> <pid> <argv_file> -> one of:
 #   teammate      teammate process (skip)
 #   prompt        waiting on a permission/question prompt (skip)
 #   busy          working
-#   busy:<what>   background work, live teammates, unknown/unavailable status (wait)
+#   busy:<what>   background work, live teammates, unknown/unavailable status,
+#                 codex/gemini screen or session file still changing (busy:active) (wait)
 #   unsent        unsent text in the input box (skip)
 #   unrecognized  input box not positively identified (claude: while json says idle) (skip)
 #   unlisted      not in a successful `claude agents --json` listing (cannot restart)
@@ -362,14 +393,12 @@ ar_state() {
   local type="$1"; shift
   case "$type" in
     claude) _ar_claude_state "$@" ;;
-    codex|gemini) _ar_screen_state "$type" "$(ar_screen "$1" "$2")" ;;
+    codex|gemini) _ar_cg_state "$type" "$1" "$2" "$3" ;;
     *) echo "unsupported type: $type" >&2; return 1 ;;
   esac
 }
 
 # ar_session_id <type> <pid> <agent_cwd> -> session id, or "-" when unknown.
-# gemini may also return "latest" (resume argument when the session can't be
-# pinned down; shown as `resume: latest`).
 ar_session_id() {
   local type="$1" pid="$2" row sid
   case "$type" in
@@ -378,8 +407,8 @@ ar_session_id() {
       sid=$(echo "$row" | cut -f4)
       echo "${sid:--}"
       ;;
-    codex) _ar_codex_session_id "$pid" "${3:-}" ;;
-    gemini) _ar_gemini_session_id "$pid" "${3:-}" ;;
+    codex) _ar_codex_session "$pid" "${3:-}" | cut -f1 ;;
+    gemini) _ar_gemini_session "$pid" "${3:-}" | cut -f1 ;;
     *) echo "-" ;;
   esac
 }

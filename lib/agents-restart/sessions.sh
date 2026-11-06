@@ -47,23 +47,34 @@ _ar_peer_starts() {
 # _ar_pick_session <start> <target> <rows> <peers> -> "id <sid>" | "none" |
 # "multi" | "peer". rows: "sid<TAB>created_epoch" per session of the agent's
 # cwd; a session is the agent's when it was created at or after the agent
-# started, or when it is <target> (the session its argv resumes). It is
-# ambiguous ("peer") when another live agent of the same type in that cwd (peer
-# start epochs, one per line) had also started by the time it was created.
+
+# _ar_files_since <start> <dir> <name glob> -> files under dir modified at or
+# after <start> (1 s slack, so a file written in the second before counts too);
+# returns 1 when the cutoff can't be set up.
+_ar_files_since() {
+  local start="$1" dir="$2" name="$3" ref stamp
+  stamp=$(date -r $((start - 1)) +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$((start - 1))" +%Y%m%d%H%M.%S) || return 1
+  ref=$(mktemp "${TMPDIR:-/tmp}/agents-restart-since.XXXXXX") || return 1
+  if ! touch -t "$stamp" "$ref" 2>/dev/null; then rm -f "$ref"; return 1; fi
+  find "$dir" -type f -name "$name" -newer "$ref" 2>/dev/null || true
+  rm -f "$ref"
+}
+
+# _ar_pick_session <cands> <peers> -> "sid<TAB>file" of the agent's session, or "-".
+# cands: "sid<TAB>mtime<TAB>file" lines (a sid may repeat). The answer is
+# "-" unless there is exactly one distinct sid and no live peer (other agent of
+# the same type in the same cwd; start epochs, one per line) had started by the
+# time any candidate was last written: such a peer could have written it.
 _ar_pick_session() {
-  printf '%s\n' "$3" | awk -F'\t' -v start="$1" -v target="$2" -v peers="$(printf '%s' "$4" | tr '\n' ' ')" '
+  printf '%s\n' "$1" | awk -F'\t' -v peers="$(printf '%s' "$2" | tr '\n' ' ')" '
     BEGIN { np = split(peers, P, " ") }
-    NF >= 2 && $1 != "" && $2 + 0 >= start + 0 {
+    NF >= 3 && $1 != "" {
       for (i = 1; i <= np; i++) if (P[i] != "" && P[i] + 0 <= $2 + 0) amb = 1
-      if (!($1 in mine)) { mine[$1] = 1; n++; id = $1 }
+      if (!($1 in seen)) { seen[$1] = 1; n++ }
+      if (!($1 in best) || $2 + 0 > bm[$1]) { best[$1] = $3; bm[$1] = $2 + 0 }
+      id = $1
     }
-    END {
-      if (target != "" && !(target in mine)) { n++; id = target }
-      if (amb) print "peer"
-      else if (n == 1) print "id " id
-      else if (n > 1) print "multi"
-      else print "none"
-    }'
+    END { if (amb || n != 1) print "-"; else print id "\t" best[id] }'
 }
 
 # _ar_argv_after_program <pid> <program> -> argv words after the program word
@@ -87,14 +98,15 @@ _ar_uuid() {
   [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
 }
 
-# jq: epoch -> an ISO-8601 UTC timestamp ("...T23:16:06.176Z") in epoch seconds, 0 if not one.
-_AR_JQ_EPOCH='def epoch: if type == "string" then (sub("\\.[0-9]+"; "") | try fromdateiso8601 catch 0) else 0 end;'
 
 # _ar_codex_home -> Codex's home directory.
 _ar_codex_home() { echo "${CODEX_HOME:-$HOME/.codex}"; }
 
 # _ar_codex_target <pid> <home> -> the session ID that `codex [opts] resume <id|name>`
-# in the agent's argv resumes, when it exists; else empty.
+# _ar_codex_target <pid> <home> -> the session ID that `codex [opts] resume
+# <id|name>` in the agent's argv resumes; "-" when argv has `resume` but no
+# ID that resolves to exactly one existing session (--last, picker, unknown
+# or duplicate name); empty when argv has no `resume`.
 _ar_codex_target() {
   local pid="$1" home="$2" a prev="" sub="" t=""
   while IFS= read -r a; do
@@ -110,43 +122,71 @@ _ar_codex_target() {
       t="$a"; break
     fi
   done < <(_ar_argv_after_program "$pid" codex)
-  [[ -n "$t" ]] || return 0
-  if ! _ar_uuid "$t"; then
-    t=$(jq -r --arg n "$t" 'select(.thread_name? == $n) | .id // empty' "$home/session_index.jsonl" 2>/dev/null | tail -n 1 || true)
-    _ar_uuid "$t" || return 0
+  [[ "$sub" == resume ]] || return 0
+  if [[ -n "$t" ]] && ! _ar_uuid "$t"; then
+    t=$(jq -r --arg n "$t" 'select(.thread_name? == $n) | .id // empty' "$home/session_index.jsonl" 2>/dev/null | sort -u || true)
+    [[ "$(printf '%s\n' "$t" | grep -c .)" == 1 ]] || t=""
   fi
-  if [[ -n "$(find "$home/sessions" "$home/archived_sessions" -name "rollout-*-$t.jsonl*" 2>/dev/null | head -n 1)" ]]; then
+  if [[ -n "$t" ]] && _ar_uuid "$t" && [[ -n "$(_ar_codex_file "$home" "$t")" ]]; then
     echo "$t"
+  else
+    echo -
   fi
 }
 
-# _ar_codex_rows <home> <start> <cwd> -> "sid<TAB>created_epoch" for interactive
-# top-level rollouts of <cwd> named at or after <start> (names use local time).
-_ar_codex_rows() {
-  local home="$1" start="$2" cwd="$3" since f b ts
-  since=$(date -r "$start" +%Y%m%d%H%M%S 2>/dev/null || date -d "@$start" +%Y%m%d%H%M%S) || return 0
+# _ar_codex_file <home> <sid> -> the newest rollout file of that session, or empty.
+_ar_codex_file() {
+  local f best="" bm=-1 m
   while IFS= read -r f; do
-    b="${f##*/}"; ts="${b#rollout-}"; ts="${ts:0:19}"; ts="${ts//[^0-9]/}"
-    [[ ${#ts} == 14 && "$ts" -ge "$since" ]] || continue
-    head -n 1 "$f" 2>/dev/null | jq -r --arg cwd "$cwd" "$_AR_JQ_EPOCH"'
-      select(.type? == "session_meta") | .payload
-      | select(.cwd == $cwd and (.id | type) == "string")
+    m=$(_ar_mtime "$f") || continue
+    if [[ "$m" -gt "$bm" ]]; then best="$f"; bm="$m"; fi
+  done < <(find "$1/sessions" "$1/archived_sessions" -type f -name "rollout-*-$2.jsonl*" 2>/dev/null)
+  echo "$best"
+}
+
+# _ar_codex_meta <file> -> the session_meta payload of a rollout as compact
+# JSON (zstd-compressed .jsonl.zst too); returns 1 when it can't be read.
+_ar_codex_meta() {
+  local line
+  case "$1" in
+    *.zst) command -v zstd >/dev/null 2>&1 || return 1
+           line=$(zstd -dcq "$1" 2>/dev/null | head -n 1) ;;
+    *) line=$(head -n 1 "$1" 2>/dev/null) ;;
+  esac
+  printf '%s\n' "$line" | jq -ce 'select(.type == "session_meta") | .payload | select(type == "object")' 2>/dev/null
+}
+
+# _ar_codex_cands <home> <start> <cwd> -> "sid<TAB>mtime<TAB>file" for every
+# interactive (originator codex-tui), top-level rollout of <cwd> written since
+# <start>. Returns 1 when a rollout written since then can't be read (it
+# could be one of this cwd's).
+_ar_codex_cands() {
+  local home="$1" start="$2" cwd="$3" files f meta row
+  files=$(_ar_files_since "$start" "$home/sessions" 'rollout-*') || return 1
+  while IFS= read -r f; do
+    [[ "$f" == *.jsonl || "$f" == *.jsonl.zst ]] || continue
+    meta=$(_ar_codex_meta "$f") || return 1
+    row=$(printf '%s\n' "$meta" | jq -r --arg cwd "$cwd" '
+      select(.cwd == $cwd and (.id | type) == "string")
+      | select(.originator == "codex-tui")
       | select((.thread_source // "user") == "user")
       | select((.source // "cli" | type) == "string" and .source != "exec")
-      | select((.originator // "") != "codex_exec")
-      | [.id, (.timestamp | epoch)] | @tsv' 2>/dev/null || true
-  done < <(find "$home/sessions" -type f -name 'rollout-*.jsonl' 2>/dev/null)
+      | .id' 2>/dev/null) || return 1
+    [[ -n "$row" ]] && printf '%s\t%s\t%s\n' "$row" "$(_ar_mtime "$f" || echo 0)" "$f"
+  done <<< "$files"
+  return 0
 }
 
-# _ar_codex_session_id <pid> <cwd> -> session id, or "-".
+# _ar_codex_session <pid> <cwd> -> "sid<TAB>file" of the agent's session, or "-".
 # 1. A rollout the agent (or a child) holds open: `lsof -Fn` names matching
 #    <codex home>/sessions/.../rollout-...-<uuid>.jsonl.
 # 2. Codex 0.166 runs sessions in a shared app-server daemon that holds every
-#    rollout open, so the TUI holds none: the agent's session is the one rollout
-#    of its cwd created since it started, or the one its argv resumes; "-" when
-#    there is none, more than one, or another live Codex in that cwd could own it.
-_ar_codex_session_id() {
-  local pid="$1" cwd="$2" home rhome pids ids n start target rows peers pick f
+#    rollout open, so the TUI holds none. Candidates are then every codex-tui
+#    rollout of the agent's cwd written since it started, plus the session its
+#    argv resumes; the session is the only candidate (see _ar_pick_session).
+#    `resume` without a resolvable ID gives "-".
+_ar_codex_session() {
+  local pid="$1" cwd="$2" home rhome pids ids n start target cands peers f
   home=$(_ar_codex_home); rhome=$(_ar_realpath "$home")
   ar_ps_snapshot
   pids=$(_ar_tree "$pid" | paste -sd, -)
@@ -154,20 +194,23 @@ _ar_codex_session_id() {
     while IFS= read -r f; do
       [[ "$f" == "$home/sessions/"* || "$f" == "$rhome/sessions/"* ]] || continue
       [[ "$f" =~ /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$ ]] &&
-        echo "${BASH_REMATCH[1]}"
+        printf '%s\t%s\n' "${BASH_REMATCH[1]}" "$f"
     done | sort -u)
-  n=$(printf '%s' "$ids" | grep -c . || true)
-  if [[ "$n" == 1 ]]; then echo "$ids"; return; fi
+  n=$(printf '%s' "$ids" | cut -f1 | sort -u | grep -c . || true)
+  if [[ "$n" == 1 ]]; then printf '%s\n' "$ids" | head -n 1; return; fi
   if [[ "$n" -gt 1 ]]; then echo -; return; fi
   start=$(_ar_start_epoch "$pid") || { echo -; return; }
   target=$(_ar_codex_target "$pid" "$home")
-  rows=$(_ar_codex_rows "$home" "$start" "$cwd")
+  [[ "$target" != - ]] || { echo -; return; }
+  cands=$(_ar_codex_cands "$home" "$start" "$cwd") || { echo -; return; }
+  if [[ -n "$target" ]]; then
+    f=$(_ar_codex_file "$home" "$target")
+    cands=$(printf '%s\n%s\t%s\t%s' "$cands" "$target" "$(_ar_mtime "$f" || echo 0)" "$f")
+  fi
   peers=$(_ar_peer_starts codex "$pid" "$cwd")
-  pick=$(_ar_pick_session "$start" "$target" "$rows" "$peers")
-  if [[ "$pick" == "id "* ]]; then echo "${pick#id }"; else echo -; fi
+  _ar_pick_session "$cands" "$peers"
 }
 
-# _ar_gemini_home -> Gemini's global directory.
 _ar_gemini_home() { echo "${GEMINI_CLI_HOME:-$HOME}/.gemini"; }
 
 # _ar_gemini_chats <cwd> -> the chats directory of that project, or empty.
@@ -185,89 +228,96 @@ _ar_gemini_chats() {
   return 0
 }
 
-# _ar_gemini_target <pid> -> "uuid <id>" for --resume/-r/--session-id <uuid>,
-# "latest" for --resume latest/<index>/no value, else empty.
+# _ar_gemini_target <pid> -> the UUID given to --resume/-r/--session-id; "-"
+# when such a flag has another value (latest, an index, none); empty when
+# argv has none of them.
 _ar_gemini_target() {
-  local a want="" v=""
+  local a want="" v="" found=""
   while IFS= read -r a; do
     if [[ -n "$want" ]]; then
-      v="$a"; [[ "$v" == -* ]] && v=latest
+      v="$a"; [[ "$v" == -* ]] && v=""
       break
     fi
     case "$a" in
-      --resume|-r|--session-id) want="$a" ;;
-      --resume=*|--session-id=*) v="${a#*=}"; v="${v:-latest}"; break ;;
+      --resume|-r|--session-id) want="$a"; found=1 ;;
+      --resume=*|--session-id=*) v="${a#*=}"; found=1; break ;;
     esac
   done < <(_ar_argv_after_program "$1" gemini)
-  [[ -n "$want" && -z "$v" ]] && v=latest
-  [[ -n "$v" ]] || return 0
-  if _ar_uuid "$v"; then echo "uuid $v"; else echo latest; fi
+  [[ -n "$found" ]] || return 0
+  if _ar_uuid "$v"; then echo "$v"; else echo -; fi
 }
 
-# _ar_gemini_rows <chats> <start> -> "sid<TAB>created<TAB>mtime<TAB>resumable(0|1)"
-# for top-level, non-subagent sessions named or written at/after <start>.
-_ar_gemini_rows() {
-  local chats="$1" start="$2" since f b ts mt recs
-  since=$(date -u -r "$start" +%Y%m%d%H%M 2>/dev/null || date -u -d "@$start" +%Y%m%d%H%M) || return 0
-  for f in "$chats"/session-*.json "$chats"/session-*.jsonl; do
-    [[ -f "$f" ]] || continue
-    mt=$(_ar_mtime "$f") || continue
-    b="${f##*/}"; ts="${b#session-}"; ts="${ts:0:16}"; ts="${ts//[^0-9]/}"
-    [[ "$mt" -ge "$start" || ( ${#ts} == 12 && "$ts" -ge "$since" ) ]] || continue
-    if [[ "$f" == *.jsonl ]]; then recs='[inputs | fromjson? // empty]'; else recs='[[inputs] | join("\n") | fromjson? // empty]'; fi
-    jq -nRr --arg mt "$mt" --arg jsonl "$([[ "$f" == *.jsonl ]] && echo 1)" "$_AR_JQ_EPOCH"'
-      def text: if type == "string" then .
-        elif type == "array" then map(if type == "string" then . elif type == "object" then (.text // "") else "" end) | join("")
-        elif type == "object" then (.text // "") else "" end;
-      def trimmed: gsub("^\\s+|\\s+$"; "");
-      def resumable:
-        (.type == "gemini" and (((.content // "") | text | trimmed) != "" or ((.toolCalls // []) | length) > 0 or ((.thoughts // []) | length) > 0))
-        or (.type == "user" and (((.content // "") | text | trimmed) as $t
-              | $t != "" and ($t | test("^(/|\\?|<session_context>|<hook_context>)") | not)));
-      '"$recs"' as $r
-      | (if $jsonl == "1" then {meta: ($r[0] // {}), msgs: $r[1:]} else {meta: ($r[0] // {}), msgs: ($r[0].messages // [])} end)
-      | select((.meta.sessionId | type) == "string" and .meta.kind != "subagent")
-      | [.meta.sessionId, (.meta.startTime | epoch), $mt, (if any(.msgs[]?; type == "object" and resumable) then 1 else 0 end)]
-      | @tsv' < "$f" 2>/dev/null || true
-  done
+# _ar_gemini_parse <file> -> "sid<TAB>resumable(0|1)", "skip" for a subagent
+# session, or returns 1 when the file isn't a session Gemini would read.
+# Resumable follows Gemini's isResumableMessageRecord.
+_ar_gemini_parse() {
+  local recs out
+  if [[ "$1" == *.jsonl ]]; then recs='[inputs | fromjson? // empty]'; else recs='[[inputs] | join("\n") | fromjson? // empty]'; fi
+  out=$(jq -nRr --arg jsonl "$([[ "$1" == *.jsonl ]] && echo 1)" '
+    def text: if type == "string" then .
+      elif type == "array" then map(if type == "string" then . elif type == "object" then (.text // "") else "" end) | join("")
+      elif type == "object" then (.text // "") else "" end;
+    def trimmed: gsub("^\\s+|\\s+$"; "");
+    def resumable:
+      (.type == "gemini" and (((.content // "") | text | trimmed) != "" or ((.toolCalls // []) | length) > 0 or ((.thoughts // []) | length) > 0))
+      or (.type == "user" and (((.content // "") | text | trimmed) as $t
+            | $t != "" and ($t | test("^(/|\\?|<session_context>|<hook_context>)") | not)));
+    '"$recs"' as $r
+    | (if $jsonl == "1" then {meta: ($r[0] // {}), msgs: $r[1:]} else {meta: ($r[0] // {}), msgs: ($r[0].messages // [])} end)
+    | if .meta.kind == "subagent" then "skip"
+      elif (.meta.sessionId | type) != "string" then empty
+      else [.meta.sessionId, (if any(.msgs[]?; type == "object" and resumable) then 1 else 0 end)] | @tsv end' < "$1" 2>/dev/null)
+  [[ -n "$out" ]] || return 1
+  printf '%s\n' "$out"
 }
 
-# _ar_gemini_session_id <pid> <cwd> -> the value for `gemini --resume`: the
-# session UUID (0.67 accepts it), "latest" when the session can't be pinned
-# down, or "-" when guessing would be wrong (another live Gemini in the same
-# project could own it, or the agent's own session has nothing to resume yet).
-# The agent's session is the one created since it started or the one its argv
-# resumes (for `-r latest`/`-r <index>`, the one written since it started).
-_ar_gemini_session_id() {
-  local pid="$1" cwd="$2" chats start target tid="" rows res peers pick own w
+# _ar_gemini_cands <chats> <start> -> "sid<TAB>mtime<TAB>file<TAB>resumable" for
+# every top-level session file written since <start>, resumable or not.
+# Returns 1 when such a file can't be read.
+_ar_gemini_cands() {
+  local files f p
+  files=$(_ar_files_since "$2" "$1" 'session-*') || return 1
+  while IFS= read -r f; do
+    [[ "$f" == "$1/session-"*.json || "$f" == "$1/session-"*.jsonl ]] || continue
+    [[ "${f#"$1"/}" != */* ]] || continue
+    p=$(_ar_gemini_parse "$f") || return 1
+    [[ "$p" == skip ]] && continue
+    printf '%s\t%s\t%s\t%s\n' "${p%%$'\t'*}" "$(_ar_mtime "$f" || echo 0)" "$f" "${p#*$'\t'}"
+  done <<< "$files"
+  return 0
+}
+
+# _ar_gemini_session <pid> <cwd> -> "sid<TAB>file" of the agent's session, or "-".
+# Gemini 0.67 accepts `--resume <uuid>`. Candidates are every top-level session
+# file of the project written since the agent started (Gemini writes its own
+# at startup, also when resuming), plus the session --resume/--session-id
+# names; the session is the only candidate (see _ar_pick_session) and must have
+# resumable content. --resume latest/<index> gives "-".
+_ar_gemini_session() {
+  local pid="$1" cwd="$2" chats start target cands peers pick f p
   ar_ps_snapshot
   start=$(_ar_start_epoch "$pid") || { echo -; return; }
   chats=$(_ar_gemini_chats "$cwd")
-  peers=$(_ar_peer_starts gemini "$pid" "$cwd")
-  [[ -n "$chats" && -d "$chats" ]] || { if [[ -n "$peers" ]]; then echo -; else echo latest; fi; return; }
+  [[ -n "$chats" && -d "$chats" ]] || { echo -; return; }
   target=$(_ar_gemini_target "$pid")
-  rows=$(_ar_gemini_rows "$chats" "$start")
-  res=$(printf '%s\n' "$rows" | awk -F'\t' '$4 == 1')
-  if [[ "$target" == "uuid "* ]]; then
-    tid="${target#uuid }"
-    if ! printf '%s\n' "$res" | cut -f1 | grep -qxF "$tid" &&
-       [[ -z "$(find "$chats" -maxdepth 1 -name "session-*-${tid:0:8}.json*" 2>/dev/null | head -n 1)" ]]; then
-      tid=""
-    fi
+  [[ "$target" != - ]] || { echo -; return; }
+  cands=$(_ar_gemini_cands "$chats" "$start") || { echo -; return; }
+  if [[ -n "$target" ]]; then
+    for f in "$chats"/session-*-"${target:0:8}".json "$chats"/session-*-"${target:0:8}".jsonl; do
+      [[ -f "$f" ]] || continue
+      p=$(_ar_gemini_parse "$f") || continue
+      [[ "${p%%$'\t'*}" == "$target" ]] || continue
+      cands=$(printf '%s\n%s\t%s\t%s\t%s' "$cands" "$target" "$(_ar_mtime "$f" || echo 0)" "$f" "${p#*$'\t'}")
+    done
+    printf '%s\n' "$cands" | cut -f1 | grep -qxF "$target" || { echo -; return; }
   fi
-  pick=$(_ar_pick_session "$start" "$tid" "$(printf '%s\n' "$res" | cut -f1,2)" "$peers")
-  case "$pick" in
-    "id "*) echo "${pick#id }"; return ;;
-    peer) echo -; return ;;
-  esac
-  [[ -z "$peers" ]] || { echo -; return; }
-  if [[ "$pick" == none ]]; then
-    own=$(_ar_pick_session "$start" "" "$(printf '%s\n' "$rows" | cut -f1,2)" "")
-    if [[ "$own" != none && "$target" != latest ]]; then echo -; return; fi
-    if [[ "$target" == latest ]]; then
-      w=$(printf '%s\n' "$res" | awk -F'\t' -v s="$start" '$3 + 0 >= s + 0 && $2 + 0 < s + 0 { print $1 }' | sort -u)
-      if [[ -n "$w" && "$(printf '%s\n' "$w" | wc -l | tr -d ' ')" == 1 ]]; then echo "$w"; return; fi
-    fi
+  peers=$(_ar_peer_starts gemini "$pid" "$cwd")
+  pick=$(_ar_pick_session "$(printf '%s\n' "$cands" | cut -f1-3)" "$peers")
+  [[ "$pick" != - ]] || { echo -; return; }
+  # Only a session with something to resume (Gemini rejects others).
+  if printf '%s\n' "$cands" | awk -F'\t' -v s="${pick%%$'\t'*}" '$1 == s && $4 == 1 { ok = 1 } END { exit !ok }'; then
+    echo "$pick"
+  else
+    echo -
   fi
-  echo latest
 }
