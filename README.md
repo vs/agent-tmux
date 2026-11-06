@@ -13,7 +13,7 @@ talk to each other, and ask Codex for a review with one command.
 | `lib/swarm/` | Shell modules behind `swarm` (config, open, delegate, layout, status, watch). |
 | `skills/swarm` | Claude Code skill that teaches an orchestrator to use `swarm delegate`. |
 | `bin/agents-restart` | CLI that restarts upgraded Claude, Codex and Gemini agents in their tmux panes, resuming the same conversation. |
-| `bin/agents-restart-argv` | Helper that works out how to resume an agent from its command line. |
+| `bin/agents-restart-argv` | Python helper for `agents-restart` that prints a process's exact argv (NUL-separated), so arguments with spaces or quotes survive into the resume command. |
 | `lib/agents-restart/` | Shell modules behind `agents-restart` (discovery, state, session ids, restart flow, live UI). |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
@@ -97,11 +97,15 @@ agents-restart -h         # usage
 
 Busy agents, background work included, are waited for; press Ctrl+C to stop waiting. It looks at the default tmux server and the one in `$SWARM_TMUX_SOCKET`.
 
+It needs `tmux`, `jq` and `python3` (to read each agent's exact command line). Without a working `python3`, agents are still listed, but each one fails with `can't read exact arguments` and keeps running untouched.
+
 Skipped (nothing is touched): an agent at a permission prompt or with unsent input, teammate panes, panes whose screen it doesn't recognize, a CLI that isn't installed, an agent that exited while it waited, and the pane you run it from (its resume command is printed instead).
 
-Failed (the agent keeps running and nothing is typed): no session id (for example two Codex or Gemini sessions in the same folder, `codex resume --last`, or `codex -C`), a Claude agent missing from `claude agents`, or a pane with no shell to return to. If a failure comes after the agent quit, a resume command is printed for you to paste. When anything failed, the path of a diagnostics log is printed.
+Failed (the agent keeps running and nothing is typed): no session id (for example two Codex or Gemini sessions in the same folder, `codex resume --last`, or `codex -C`), a Claude agent missing from `claude agents`, a pane with no shell to return to, or a command-line flag it doesn't know (`unknown flag <f>`: it can't tell whether the flag takes a value, so it won't guess the resume command). If a failure comes after the agent quit, a resume command is printed for you to paste. When anything failed, the path of a diagnostics log is printed.
 
 Gemini support was built from the Gemini 0.67 source and hasn't yet been checked against a live signed-in Gemini.
+
+Claude's vim mode isn't detected: a Claude left in vim NORMAL mode reads `/exit` as vim keys, so it may not quit, or may leave stray text in its input box.
 
 ## /agent-tmux:codex-review
 
