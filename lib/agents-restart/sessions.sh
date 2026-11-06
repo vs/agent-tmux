@@ -22,12 +22,18 @@ _ar_tree() {
 # _ar_peer_starts <type> <pid> <cwd> -> start epochs of the other live <type>
 # processes (not <pid>, its descendants or ancestors; not daemons) in <cwd>.
 _ar_peer_starts() {
-  local type="$1" pid="$2" cwd="$3" p c
+  _ar_peers "$1" "$2" | awk -F'\t' -v c="$3" '$2 == c && $1 != "" { print $1 }'
+}
+
+# _ar_peers <type> <pid> -> "start<TAB>cwd" of every other live <type> process
+# (not <pid>, its descendants or ancestors; not daemons).
+_ar_peers() {
+  local type="$1" pid="$2" p c
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue
     c=$(_ar_lsof_field "$p" cwd)
-    [[ "$c" == "$cwd" ]] || continue
-    _ar_start_epoch "$p" || true
+    [[ -n "$c" ]] || continue
+    printf '%s\t%s\n' "$(_ar_start_epoch "$p" || true)" "$c"
   done < <(awk -v t="$type" -v me="$pid" "$_AR_AWK_AGENT"'
     { read_ps() }
     END {
@@ -43,10 +49,6 @@ _ar_peer_starts() {
         if (!(p in skip) && agent(args[p]) == t && args[p] !~ / (app-server|exec-server|mcp-server)( |$)/) print p
     }' "$AR_PS_FILE")
 }
-
-# _ar_pick_session <start> <target> <rows> <peers> -> "id <sid>" | "none" |
-# "multi" | "peer". rows: "sid<TAB>created_epoch" per session of the agent's
-# cwd; a session is the agent's when it was created at or after the agent
 
 # _ar_files_since <start> <dir> <name glob> -> files under dir modified at or
 # after <start> (1 s slack, so a file written in the second before counts too);
@@ -102,7 +104,6 @@ _ar_uuid() {
 # _ar_codex_home -> Codex's home directory.
 _ar_codex_home() { echo "${CODEX_HOME:-$HOME/.codex}"; }
 
-# _ar_codex_target <pid> <home> -> the session ID that `codex [opts] resume <id|name>`
 # _ar_codex_target <pid> <home> -> the session ID that `codex [opts] resume
 # <id|name>` in the agent's argv resumes; "-" when argv has `resume` but no
 # ID that resolves to exactly one existing session (--last, picker, unknown
@@ -156,25 +157,34 @@ _ar_codex_meta() {
   printf '%s\n' "$line" | jq -ce 'select(.type == "session_meta") | .payload | select(type == "object")' 2>/dev/null
 }
 
-# _ar_codex_cands <home> <start> <cwd> -> "sid<TAB>mtime<TAB>file" for every
-# interactive (originator codex-tui), top-level rollout of <cwd> written since
-# <start>. Returns 1 when a rollout written since then can't be read (it
-# could be one of this cwd's).
+# _ar_codex_cands <home> <start> -> "sid<TAB>mtime<TAB>file<TAB>cwd" for every
+# interactive (originator codex-tui), top-level rollout written since <start>,
+# in any cwd. Returns 1 when a rollout written since then can't be read (it
+# could be the agent's).
 _ar_codex_cands() {
-  local home="$1" start="$2" cwd="$3" files f meta row
+  local home="$1" start="$2" files f meta row
   files=$(_ar_files_since "$start" "$home/sessions" 'rollout-*') || return 1
   while IFS= read -r f; do
     [[ "$f" == *.jsonl || "$f" == *.jsonl.zst ]] || continue
     meta=$(_ar_codex_meta "$f") || return 1
-    row=$(printf '%s\n' "$meta" | jq -r --arg cwd "$cwd" '
-      select(.cwd == $cwd and (.id | type) == "string")
+    row=$(printf '%s\n' "$meta" | jq -r '
+      select((.id | type) == "string" and (.cwd | type) == "string")
       | select(.originator == "codex-tui")
       | select((.thread_source // "user") == "user")
       | select((.source // "cli" | type) == "string" and .source != "exec")
-      | .id' 2>/dev/null) || return 1
-    [[ -n "$row" ]] && printf '%s\t%s\t%s\n' "$row" "$(_ar_mtime "$f" || echo 0)" "$f"
+      | [.id, .cwd] | @tsv' 2>/dev/null) || return 1
+    [[ -n "$row" ]] && printf '%s\t%s\t%s\t%s\n' "${row%%$'\t'*}" "$(_ar_mtime "$f" || echo 0)" "$f" "${row#*$'\t'}"
   done <<< "$files"
   return 0
+}
+
+# _ar_codex_has_cd <pid> -> 0 when argv sets the working directory (-C/--cd).
+_ar_codex_has_cd() {
+  local a
+  while IFS= read -r a; do
+    case "$a" in -C|-C?*|--cd|--cd=*) return 0 ;; esac
+  done < <(_ar_argv_after_program "$1" codex)
+  return 1
 }
 
 # _ar_codex_session <pid> <cwd> -> "sid<TAB>file" of the agent's session, or "-".
@@ -185,8 +195,12 @@ _ar_codex_cands() {
 #    rollout of the agent's cwd written since it started, plus the session its
 #    argv resumes; the session is the only candidate (see _ar_pick_session).
 #    `resume` without a resolvable ID gives "-".
+#    Codex can run a session in another directory (-C/--cd, or resuming a
+#    session into its saved directory), where it would be invisible here: so
+#    "-" also when argv has -C/--cd, or when a rollout of another cwd was
+#    written since the agent started and no other live Codex runs in that cwd.
 _ar_codex_session() {
-  local pid="$1" cwd="$2" home rhome pids ids n start target cands peers f
+  local pid="$1" cwd="$2" home rhome pids ids n start target all cands peers f c
   home=$(_ar_codex_home); rhome=$(_ar_realpath "$home")
   ar_ps_snapshot
   pids=$(_ar_tree "$pid" | paste -sd, -)
@@ -202,13 +216,19 @@ _ar_codex_session() {
   start=$(_ar_start_epoch "$pid") || { echo -; return; }
   target=$(_ar_codex_target "$pid" "$home")
   [[ "$target" != - ]] || { echo -; return; }
-  cands=$(_ar_codex_cands "$home" "$start" "$cwd") || { echo -; return; }
+  ! _ar_codex_has_cd "$pid" || { echo -; return; }
+  all=$(_ar_codex_cands "$home" "$start") || { echo -; return; }
+  peers=$(_ar_peers codex "$pid")
+  while IFS= read -r c; do
+    [[ -n "$c" && "$c" != "$cwd" ]] || continue
+    printf '%s\n' "$peers" | cut -f2 | grep -qxF "$c" || { echo -; return; }
+  done < <(printf '%s\n' "$all" | cut -f4 | sort -u)
+  cands=$(printf '%s\n' "$all" | awk -F'\t' -v c="$cwd" '$4 == c { print $1 "\t" $2 "\t" $3 }')
   if [[ -n "$target" ]]; then
     f=$(_ar_codex_file "$home" "$target")
     cands=$(printf '%s\n%s\t%s\t%s' "$cands" "$target" "$(_ar_mtime "$f" || echo 0)" "$f")
   fi
-  peers=$(_ar_peer_starts codex "$pid" "$cwd")
-  _ar_pick_session "$cands" "$peers"
+  _ar_pick_session "$cands" "$(printf '%s\n' "$peers" | awk -F'\t' -v c="$cwd" '$2 == c && $1 != "" { print $1 }')"
 }
 
 _ar_gemini_home() { echo "${GEMINI_CLI_HOME:-$HOME}/.gemini"; }

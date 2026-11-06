@@ -284,6 +284,13 @@ t_wait 5 cscreen_lacks "tick" || echo "codex screen not redrawn"
 U0=01a1adff-8398-72b1-b333-af3dfa74fe00
 mkroll "$(date +%s)" "$U0" "$D0"
 expect_eq "ar_state codex session file just written" busy:active "$(cst)"
+expect_eq "bad quiet window falls back to 5 s" busy:active "$(AGENTS_RESTART_QUIET_SECS=abc cst)"
+expect_eq "env number: integer" 7 "$(_ar_env_num 7 5 int)"
+expect_eq "env number: non-numeric" 5 "$(_ar_env_num abc 5 int)"
+expect_eq "env number: decimal for int" 5 "$(_ar_env_num 0.5 5 int)"
+expect_eq "env number: empty" 1 "$(_ar_env_num "" 1 dec)"
+expect_eq "env number: decimal" 0.25 "$(_ar_env_num 0.25 1 dec)"
+expect_eq "env number: negative" 1 "$(_ar_env_num -3 1 dec)"
 touch_at "$SP0" "$(rollf "$U0")"
 quiet() { [ $(( $(date +%s) - SP0 )) -ge 3 ]; }
 t_wait 10 quiet
@@ -315,12 +322,12 @@ expect_eq "codex no rollout yet" - "$(ar_session_id codex "$CA" "$D1")"
 mkroll "$SA" "$U1" "$D1"
 expect_eq "codex rollout written since start" "$U1" "$(ar_session_id codex "$CA" "$D1")"
 mkroll $((SA - 50)) "$U9" "$D1"
-mkroll $((SA + 3)) "$U2" "$D2"
+mkroll $((SA - 60)) "$U2" "$D2"
 mkroll $((SA + 4)) "$U3" "$D1" '.payload.thread_source = "subagent"'
 mkroll $((SA + 4)) "$U5" "$D1" '.payload.source = "exec"'
 mkroll $((SA + 4)) "$U6" "$D1" '.payload.source = {"subagent": "x"}'
 mkroll $((SA + 4)) "$U7" "$D1" '.payload.originator = "codex_vscode"'
-expect_eq "codex ignores older, other-cwd, subagent, exec and non-TUI rollouts" "$U1" "$(ar_session_id codex "$CA" "$D1")"
+expect_eq "codex ignores older, subagent, exec and non-TUI rollouts" "$U1" "$(ar_session_id codex "$CA" "$D1")"
 rmroll "$U3"; rmroll "$U5"; rmroll "$U6"; rmroll "$U7"
 mkroll $((SA + 5)) "$U3" "$D1"
 expect_eq "codex two rollouts since start is ambiguous" - "$(ar_session_id codex "$CA" "$D1")"
@@ -360,6 +367,42 @@ CF=$(start s2:7 "$D5" "codex resume 01a1adff-0000-0000-0000-000000000000")
 expect_eq "codex resume of a missing session" - "$(ar_session_id codex "$CF" "$D5")"
 CG=$(start s2:8 "$D5" "codex resume")
 expect_eq "codex resume picker" - "$(ar_session_id codex "$CG" "$D5")"
+
+# R16: Codex's effective cwd may differ from the process cwd.
+UA=01a1adff-8398-72b1-b333-af3dfa74fe0a; UB=01a1adff-8398-72b1-b333-af3dfa74fe0b
+UX=01a1adff-8398-72b1-b333-af3dfa74fe0c; UN=01a1adff-8398-72b1-b333-af3dfa74fe0d
+UC=01a1adff-8398-72b1-b333-af3dfa74fe0e
+for i in 6 7 8 9 10 11; do mkdir -p "$WORK/c$i"; done
+D6=$(real "$WORK/c6"); D7=$(real "$WORK/c7"); D8=$(real "$WORK/c8"); D9=$(real "$WORK/c9")
+D10=$(real "$WORK/c10"); D11=$(real "$WORK/c11")
+CH=$(start s2:9 "$D6" "codex")
+mkroll "$(date +%s)" "$UA" "$D6"
+expect_eq "codex own rollout (baseline)" "$UA" "$(ar_session_id codex "$CH" "$D6")"
+mkroll "$(date +%s)" "$UB" "$D7"
+expect_eq "codex (a) in-app /resume into another cwd" - "$(ar_session_id codex "$CH" "$D6")"
+CX=$(start s2:10 "$D7" "codex")
+expect_eq "codex (d) other-cwd rollout explained by a live peer there" "$UA" "$(ar_session_id codex "$CH" "$D6")"
+mkroll $((SA - 800)) "$UX" "$D9"
+CI=$(start s2:11 "$D8" "codex resume $UX")
+expect_eq "codex resume of another cwd's session (nothing new yet)" "$UX" "$(ar_session_id codex "$CI" "$D8")"
+mkroll "$(date +%s)" "$UN" "$D9"
+expect_eq "codex (b) resumed into its saved cwd, then /new there" - "$(ar_session_id codex "$CI" "$D8")"
+rmroll "$UN"; touch_at $((SA - 800)) "$(rollf "$UX")"
+# Each alone in its cwd with one rollout there: only -C/--cd can make it "-".
+for i in 12 13; do mkdir -p "$WORK/c$i"; done
+D12=$(real "$WORK/c12"); D13=$(real "$WORK/c13")
+UD=01a1adff-8398-72b1-b333-af3dfa74fe0f; UE=01a1adff-8398-72b1-b333-af3dfa74fe10
+CJ=$(start s2:12 "$D10" "codex -C $D11")
+CK=$(start s2:13 "$D12" "codex --cd=$D11")
+CL=$(start s2:14 "$D13" "codex -m o3 -C$D11")
+mkroll "$(date +%s)" "$UC" "$D10"; mkroll "$(date +%s)" "$UD" "$D12"; mkroll "$(date +%s)" "$UE" "$D13"
+expect_eq "codex (c) -C <dir>" - "$(ar_session_id codex "$CJ" "$D10")"
+expect_eq "codex (c) --cd=<dir>" - "$(ar_session_id codex "$CK" "$D12")"
+expect_eq "codex (c) -C<dir>" - "$(ar_session_id codex "$CL" "$D13")"
+mkdir -p "$WORK/c14"; D14=$(real "$WORK/c14"); UF=01a1adff-8398-72b1-b333-af3dfa74fe11
+CM=$(start s2:15 "$D14" "codex -m o3 -c x=1")
+mkroll "$(date +%s)" "$UF" "$D14"
+expect_eq "codex (c) control: same options without -C" "$UF" "$(ar_session_id codex "$CM" "$D14")"
 
 # --- ar_session_id gemini ---
 GH="$HOME/.gemini"

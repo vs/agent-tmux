@@ -346,6 +346,16 @@ _ar_screen_state() {
   if [[ -n "${r#ok	}" ]]; then echo unsent; else echo idle; fi
 }
 
+# _ar_env_num <value> <default> <int|dec> -> value when it is a non-negative
+# integer (int) or decimal (dec), else default.
+_ar_env_num() {
+  case "$3" in
+    int) [[ "$1" =~ ^[0-9]+$ ]] && { echo "$1"; return; } ;;
+    *) [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]] && { echo "$1"; return; } ;;
+  esac
+  echo "$2"
+}
+
 # _ar_plain <screen> -> the screen without escape sequences.
 _ar_plain() { printf '%s\n' "$1" | _ar_clean | cut -f2; }
 
@@ -366,9 +376,9 @@ _ar_cg_state() {
     file="${sess#*$'\t'}"
     mt=$(_ar_mtime "$file") || { echo busy:active; return; }
     now=$(date +%s)
-    if [[ $((now - mt)) -lt "${AGENTS_RESTART_QUIET_SECS:-5}" ]]; then echo busy:active; return; fi
+    if [[ $((now - mt)) -lt "$(_ar_env_num "${AGENTS_RESTART_QUIET_SECS:-}" 5 int)" ]]; then echo busy:active; return; fi
   fi
-  sleep "${AGENTS_RESTART_STABLE_DELAY:-1}"
+  sleep "$(_ar_env_num "${AGENTS_RESTART_STABLE_DELAY:-}" 1 dec)"
   if [[ "$(_ar_plain "$screen")" != "$(_ar_plain "$(ar_screen "$sock" "$pane")")" ]]; then
     echo busy:active; return
   fi
@@ -387,8 +397,8 @@ _ar_cg_state() {
 #   unrecognized  input box not positively identified (claude: while json says idle) (skip)
 #   unlisted      not in a successful `claude agents --json` listing (cannot restart)
 #   idle          safe to restart
-# claude uses `claude agents --json` plus the screen; codex and gemini only the
-# screen (prompt, busy, busy:<what>, unrecognized, unsent, idle).
+# claude uses `claude agents --json` plus the screen; codex and gemini the
+# screen plus their session file's activity (see _ar_cg_state).
 ar_state() {
   local type="$1"; shift
   case "$type" in
