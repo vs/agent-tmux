@@ -16,15 +16,16 @@
 #   drop     boolean flag, dropped
 #   keep     anything else (booleans, unknown flags): kept alone
 # Dropped on resume: --resume/-r, --continue/-c, --session-id, --fork-session,
-# prompts (-p/-i for gemini), --from-pr and --teleport (they pick another
-# conversation), and --worktree/-w and --tmux (the pane already runs inside the
+# prompts (-p/-i for gemini), --from-pr, --teleport, --cloud and gemini's
+# --session-file (they pick another conversation), --bg/--background/--desktop
+# (launch modes that detach or open another app), and --worktree/-w and --tmux (the pane already runs inside the
 # worktree; repeating it would create a second one where the session isn't).
 # A flag given as --flag=value is one word: kept as is, or dropped whole.
 _ar_flag_class() {
   case "$1:$2" in
-    claude:--resume|claude:-r|claude:--from-pr|claude:--teleport|claude:-w|claude:--worktree) echo dropopt ;;
+    claude:--resume|claude:-r|claude:--from-pr|claude:--teleport|claude:-w|claude:--worktree|claude:--cloud) echo dropopt ;;
     claude:--session-id) echo dropval ;;
-    claude:--continue|claude:-c|claude:--fork-session|claude:--tmux) echo drop ;;
+    claude:--continue|claude:-c|claude:--fork-session|claude:--tmux|claude:--bg|claude:--background|claude:--desktop) echo drop ;;
     claude:--agent|claude:--agents|claude:--append-system-prompt|claude:--autocompact|claude:--debug-file|\
     claude:--effort|claude:--environment|claude:--fallback-model|claude:--input-format|claude:--json-schema|\
     claude:--max-budget-usd|claude:--model|claude:-n|claude:--name|claude:--output-format|claude:--permission-mode|\
@@ -32,7 +33,7 @@ _ar_flag_class() {
     claude:--setting-sources|claude:--settings|claude:--system-prompt|claude:--system-prompt-snapshot) echo val ;;
     claude:--add-dir|claude:--allowedTools|claude:--allowed-tools|claude:--disallowedTools|claude:--disallowed-tools|\
     claude:--betas|claude:--file|claude:--mcp-config|claude:--tools) echo var ;;
-    claude:-d|claude:--debug|claude:--prompt-suggestions|claude:--remote-control|claude:--cloud) echo opt ;;
+    claude:-d|claude:--debug|claude:--prompt-suggestions|claude:--remote-control) echo opt ;;
 
     codex:--include-non-interactive|codex:--last|codex:--all|codex:--worktree) echo drop ;;
     codex:-c|codex:--config|codex:--enable|codex:--disable|codex:--remote|codex:--remote-auth-token-env|\
@@ -40,9 +41,9 @@ _ar_flag_class() {
     codex:-C|codex:--cd|codex:--add-dir|codex:-a|codex:--ask-for-approval) echo val ;;
     codex:-i|codex:--image) echo var ;;
 
-    gemini:--resume|gemini:-r|gemini:--prompt|gemini:-p|gemini:--prompt-interactive|gemini:-i|gemini:--session-id|gemini:--delete-session) echo dropval ;;
+    gemini:--resume|gemini:-r|gemini:--prompt|gemini:-p|gemini:--prompt-interactive|gemini:-i|gemini:--session-id|gemini:--session-file|gemini:--delete-session) echo dropval ;;
     gemini:-w|gemini:--worktree) echo dropopt ;;
-    gemini:-m|gemini:--model|gemini:--approval-mode|gemini:-o|gemini:--output-format|gemini:--session-file) echo val ;;
+    gemini:-m|gemini:--model|gemini:--approval-mode|gemini:-o|gemini:--output-format) echo val ;;
     gemini:--policy|gemini:--admin-policy|gemini:--allowed-mcp-server-names|gemini:--allowed-tools|\
     gemini:-e|gemini:--extensions|gemini:--include-directories) echo var ;;
     *) echo keep ;;
@@ -73,7 +74,7 @@ _ar_launcher_env() {
   [[ -n "$script" && -f "$script" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
     # shellcheck disable=SC2206
-    words=($line)
+    set -f; words=($line); set +f
     [[ ${#words[@]} -gt 0 ]] || continue
     set -- "${words[@]}"
     [[ "$1" != exec ]] || shift
@@ -157,8 +158,8 @@ ar_resume_cmd() {
     gemini) cmd=(gemini ${kept[@]+"${kept[@]}"} --resume "$sid") ;;
     codex)
       cmd=(codex resume ${kept[@]+"${kept[@]}"})
-      # a trailing variadic option would swallow the session ID
-      [[ $lastvar == 1 && ${#kept[@]} -gt 0 && "${kept[${#kept[@]}-1]}" != -* ]] && cmd+=(--)
+      # a trailing variadic option (even with no values yet) would swallow the session ID
+      [[ $lastvar == 1 ]] && cmd+=(--)
       cmd+=("$sid") ;;
   esac
 

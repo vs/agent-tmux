@@ -54,6 +54,11 @@ check "claude bool flags kept" claude 'claude|--dangerously-skip-permissions|--v
 check "claude interpreted (node)" claude 'node|/x/claude.js|--name|n|p' claude --name n --resume "$NEW"
 check "claude interpreted (bash)" claude 'bash|/x/claude|-c' claude --resume "$NEW"
 
+check "claude drops --cloud with value" claude 'claude|--cloud|desc|--model|m' claude --model m --resume "$NEW"
+check "claude drops --cloud without value" claude 'claude|--cloud|--model|m' claude --model m --resume "$NEW"
+check "claude drops --cloud=x" claude 'claude|--cloud=x|--model|m' claude --model m --resume "$NEW"
+check "claude drops --bg --background --desktop" claude 'claude|--bg|--background|--desktop|--model|m' claude --model m --resume "$NEW"
+
 # --- codex ---
 check "codex node script" codex 'node|/x/codex.js|-m|o3|do X' codex resume -m o3 "$NEW"
 check "codex resume --last" codex 'codex|resume|--last' codex resume "$NEW"
@@ -65,6 +70,7 @@ check "codex -C kept with value" codex 'codex|-C|/a b|prompt' codex resume -C '/
 check "codex --cd=dir kept" codex 'codex|--cd=/q|prompt' codex resume --cd=/q "$NEW"
 check "codex -- drops rest" codex 'codex|-m|o|--|x' codex resume -m o "$NEW"
 check "codex trailing -i variadic: -- before id" codex 'codex|-i|a.png|b.png' codex resume -i a.png b.png -- "$NEW"
+check "codex trailing -i with no values: -- before id" codex 'codex|-m|o|-i' codex resume -m o -i -- "$NEW"
 check "codex drops --include-non-interactive" codex 'codex|resume|--include-non-interactive|x' codex resume "$NEW"
 
 # --- gemini ---
@@ -72,6 +78,8 @@ check "gemini node, -r latest" gemini 'node|/x/gemini|-r|latest|-m|pro' gemini -
 check "gemini drops prompts" gemini 'gemini|-p|hi|-i|there|--session-id|abc|-y|query' gemini -y --resume "$NEW"
 check "gemini --resume=latest" gemini 'gemini|--resume=latest|--approval-mode|yolo' gemini --approval-mode yolo --resume "$NEW"
 check "gemini variadic array" gemini 'gemini|--include-directories|a|b|-m|x' gemini --include-directories a b -m x --resume "$NEW"
+check "gemini drops --session-file value" gemini 'gemini|--session-file|f.json|-m|x' gemini -m x --resume "$NEW"
+check "gemini drops --session-file=x" gemini 'gemini|--session-file=f.json|-m|x' gemini -m x --resume "$NEW"
 check "gemini -- drops rest" gemini 'gemini|-m|x|--|q' gemini -m x --resume "$NEW"
 
 # --- env -u from a launcher script ---
