@@ -26,22 +26,34 @@ _ar_term_cols() {
 }
 
 # ar_ui_init -> AR_FANCY=1 when stdout is a terminal and NO_COLOR is unset or
-# empty, else 0. Color variables are empty when not fancy. Test hooks:
-# AGENTS_RESTART_TEST_FANCY=1 forces fancy mode, AGENTS_RESTART_TEST_COLS the width.
+# empty, else 0. Colors are on when fancy, or when CLICOLOR_FORCE is set to
+# anything but 0 (and NO_COLOR is unset or empty): colored plain lines, no
+# redraws, for viewers that render ANSI colors but not cursor movement (a
+# Raycast script command's full output). Color variables are empty otherwise.
+# Test hooks: AGENTS_RESTART_TEST_FANCY=1 forces fancy mode,
+# AGENTS_RESTART_TEST_COLS the width.
 ar_ui_init() {
+  local color=0
   AR_FANCY=0
   if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then AR_FANCY=1; fi
   [[ "${AGENTS_RESTART_TEST_FANCY:-}" != 1 ]] || AR_FANCY=1
-  if [[ $AR_FANCY == 1 ]]; then
+  if [[ $AR_FANCY == 1 ]] ||
+     [[ -n "${CLICOLOR_FORCE:-}" && "${CLICOLOR_FORCE}" != 0 && -z "${NO_COLOR:-}" ]]; then
+    color=1
+  fi
+  if [[ $color == 1 ]]; then
     AR_C_GREEN=$'\e[32m'; AR_C_YELLOW=$'\e[33m'; AR_C_RED=$'\e[31m'
     AR_C_DIM=$'\e[2m'; AR_C_BOLD=$'\e[1m'; AR_C_OFF=$'\e[0m'
+  else
+    AR_C_GREEN=""; AR_C_YELLOW=""; AR_C_RED=""; AR_C_DIM=""; AR_C_BOLD=""; AR_C_OFF=""
+  fi
+  if [[ $AR_FANCY == 1 ]]; then
     if [[ "${AGENTS_RESTART_TEST_COLS:-}" =~ ^[0-9]+$ ]]; then
       AR_UI_COLS=$AGENTS_RESTART_TEST_COLS
     else
       AR_UI_COLS=$(_ar_term_cols)
     fi
   else
-    AR_C_GREEN=""; AR_C_YELLOW=""; AR_C_RED=""; AR_C_DIM=""; AR_C_BOLD=""; AR_C_OFF=""
     AR_UI_COLS=0
   fi
   AR_UI_N=0; AR_UI_LIVE=0

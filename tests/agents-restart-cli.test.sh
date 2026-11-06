@@ -55,6 +55,21 @@ n=$(bash -c 'source lib/agents-restart/common.sh; source lib/agents-restart/disc
 if [[ "$n" =~ ^[0-9]+$ && $n -ge 1 && $n -le 5 ]]; then t_pass "render: clock read about once a second ($n reads / 25 frames)"
 else t_fail "render: clock read about once a second" "reads: ${n:-none}"; fi
 
+# CLICOLOR_FORCE: colors without a terminal, but no redraws (Raycast's full output)
+ui_mode() {
+  env "$@" bash -c 'source lib/agents-restart/common.sh; source lib/agents-restart/discover.sh; source lib/agents-restart/ui.sh
+    ar_installed_version() { :; }
+    ar_ui_init; ar_ui_add 0:0.0 f claude; ar_ui_set "$AR_UI_LAST" ok resumed
+    printf "fancy=%s cols=%s\n" "$AR_FANCY" "$AR_UI_COLS"; ar_ui_render' | cat
+}
+out=$(ui_mode CLICOLOR_FORCE=1)
+expect_eq "clicolor: no redraws" "fancy=0 cols=0" "$(head -1 <<<"$out")"
+case "$out" in *$'\e[32m✓'*) t_pass "clicolor: colored mark" ;; *) t_fail "clicolor: colored mark" "$out" ;; esac
+case "$out" in *$'\e[J'*|*$'\e[2K'*) t_fail "clicolor: no cursor codes" "$out" ;; *) t_pass "clicolor: no cursor codes" ;; esac
+case "$(ui_mode CLICOLOR_FORCE=1 NO_COLOR=1)" in *$'\e['*) t_fail "clicolor: NO_COLOR wins" "colors" ;; *) t_pass "clicolor: NO_COLOR wins" ;; esac
+case "$(ui_mode CLICOLOR_FORCE=0)" in *$'\e['*) t_fail "clicolor: 0 means off" "colors" ;; *) t_pass "clicolor: 0 means off" ;; esac
+case "$(ui_mode -u CLICOLOR_FORCE)" in *$'\e['*) t_fail "clicolor: plain by default" "colors" ;; *) t_pass "clicolor: plain by default" ;; esac
+
 # temp files go to the run's work dir (removed on exit, Ctrl+C included), not $TMPDIR
 mkdir -p "$WORK/wd" "$WORK/tmpd"
 AR_WD="$WORK/wd" TMPDIR="$WORK/tmpd" bash -c 'for f in lib/agents-restart/*.sh; do source "$f"; done

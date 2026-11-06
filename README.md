@@ -107,6 +107,8 @@ Gemini support was built from the Gemini 0.67 source and hasn't yet been checked
 
 Claude's vim mode isn't detected: a Claude left in vim NORMAL mode reads `/exit` as vim keys, so it may not quit, or may leave stray text in its input box.
 
+Output is plain (no colors, spinners or redraws) when stdout isn't a terminal or `NO_COLOR` is set. `CLICOLOR_FORCE=1` keeps the colors without a terminal, still with no redraws.
+
 ## /agent-tmux:codex-review
 
 Run in Claude Code, in a tmux window that has exactly one Codex pane:
