@@ -62,12 +62,33 @@ fi
 
 # --- tmux: pane labels in borders ---
 
-source_line="source-file \"$REPO/config/tmux.conf\""
-if [[ -f "$HOME/.tmux.conf" ]] && grep -qF "$source_line" "$HOME/.tmux.conf"; then
-  info "ok      ~/.tmux.conf sources config/tmux.conf"
+# ~/.tmux.conf sources a fixed path, linked to this repo's config: the line
+# never names the repo, so it survives a moved repo (the next run re-points the
+# link) and a dotfiles repo can carry it as is (-q: no error where agent-tmux
+# isn't installed).
+link "$REPO/config/tmux.conf" "$HOME/.agent-tmux/tmux.conf"
+tmux_conf="$HOME/.tmux.conf"
+source_line='source-file -q ~/.agent-tmux/tmux.conf'
+sourced_re='^[[:space:]]*source-file([[:space:]]+-q)?[[:space:]]+["'\'']?(~|\$HOME|'"$HOME"')/\.agent-tmux/tmux\.conf["'\'']?[[:space:]]*$'
+# Earlier versions appended `source-file "<repo>/config/tmux.conf"` under a
+# "# agent-tmux" line; that line is swapped for the new one in place.
+swap_old='prev == "# agent-tmux" && /^source-file ".*\/config\/tmux\.conf"$/ { print line; found = 1; prev = $0; next }
+  { print; prev = $0 }
+  END { exit !found }'
+if [[ -f "$tmux_conf" ]] && grep -qE "$sourced_re" "$tmux_conf"; then
+  info "ok      ~/.tmux.conf sources ~/.agent-tmux/tmux.conf"
+elif [[ -f "$tmux_conf" ]] && awk -v line="$source_line" "$swap_old" "$tmux_conf" > "$tmux_conf.agent-tmux.tmp"; then
+  backup="$BACKUP_DIR/.tmux.conf"
+  mkdir -p "$BACKUP_DIR"
+  cp "$tmux_conf" "$backup"
+  # Write through the path, so a symlinked ~/.tmux.conf (dotfiles) stays a link.
+  cat "$tmux_conf.agent-tmux.tmp" > "$tmux_conf"
+  rm -f "$tmux_conf.agent-tmux.tmp"
+  info "updated ~/.tmux.conf to source ~/.agent-tmux/tmux.conf instead of the repo path (backup: $backup)"
 else
-  printf '\n# agent-tmux\n%s\n' "$source_line" >> "$HOME/.tmux.conf"
-  info "updated ~/.tmux.conf to source config/tmux.conf"
+  rm -f "$tmux_conf.agent-tmux.tmp"
+  printf '\n# agent-tmux\n%s\n' "$source_line" >> "$tmux_conf"
+  info "updated ~/.tmux.conf to source ~/.agent-tmux/tmux.conf"
 fi
 if tmux list-sessions >/dev/null 2>&1; then
   tmux source-file "$REPO/config/tmux.conf"

@@ -41,7 +41,7 @@ It needs `tmux` (3.2+) and `jq`, and:
 - links `bin/tmux-bridge` into `~/.local/bin` (must be on `PATH`; Codex needs it there);
 - links `skills/smux` into `~/.codex/skills`;
 - removes `~/.claude/skills/{smux,codex-review}` links left by earlier versions, which would duplicate the plugin's skills;
-- adds `source-file <repo>/config/tmux.conf` to `~/.tmux.conf`;
+- links `config/tmux.conf` to `~/.agent-tmux/tmux.conf` and adds `source-file -q ~/.agent-tmux/tmux.conf` to `~/.tmux.conf`, unless a line already sources that path. The line names no repo path, so a dotfiles repo can carry it (`-q`: no error where agent-tmux isn't installed). A `source-file "<repo>/config/tmux.conf"` line from an earlier version is swapped for it in place (backup under `~/.agent-tmux/backups`);
 - links `bin/swarm` into `~/.local/bin` and copies `config/swarm.conf.example` to `~/.agent-tmux/swarm.conf` if you have none (never overwritten);
 - links `bin/agents-restart` into `~/.local/bin`;
 - creates `~/.agent-tmux/venv` with the `iterm2` package for tab placement (a failure only warns; `AGENT_TMUX_SKIP_VENV=1` skips it);
