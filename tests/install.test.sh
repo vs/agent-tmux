@@ -18,6 +18,7 @@ expect "install runs" 0 "done." run_install
 expect_eq "tmux-bridge linked" "$T_REPO/bin/tmux-bridge" "$(readlink "$H/.local/bin/tmux-bridge")"
 expect_eq "swarm linked" "$T_REPO/bin/swarm" "$(readlink "$H/.local/bin/swarm")"
 expect_eq "agents-restart linked" "$T_REPO/bin/agents-restart" "$(readlink "$H/.local/bin/agents-restart")"
+expect_eq "iterm-tmux linked" "$T_REPO/bin/iterm-tmux" "$(readlink "$H/.local/bin/iterm-tmux")"
 expect_eq "config created" "1" "$( [ -f "$H/.agent-tmux/swarm.conf" ] && echo 1)"
 expect_eq "config is the example" "1" "$(cmp -s "$T_REPO/config/swarm.conf.example" "$H/.agent-tmux/swarm.conf" && echo 1)"
 expect_eq "example sets root" "1" "$(grep -c '^root ~/workspace$' "$H/.agent-tmux/swarm.conf")"
@@ -75,4 +76,18 @@ expect_eq "old line: still a symlink" "$WORK/dotfiles/tmux.conf" "$(readlink "$H
 expect_eq "old line: backed up" "1" "$(grep -c '/old/place/' "$H"/.agent-tmux/backups/*/.tmux.conf | tail -1)"
 expect_eq "old line: no temp file left" "" "$(ls -a "$H" | grep agent-tmux.tmp || true)"
 expect "old line: rerun is a no-op" 0 "ok      ~/.tmux.conf sources ~/.agent-tmux/tmux.conf" run_install
+
+# iTerm hotkey profiles: a bare `tmux -CC` is pointed at iterm-tmux, with
+# the old command kept; others are left alone.
+: > "$FAKE_ITERM_LOG"
+export FAKE_ITERM_OUT=$'G1\tYes\t/opt/homebrew/bin/tmux -CC\ttmux\nG2\tNo\t\tDefault\nG3\tYes\t/bin/zsh -l\tzsh'
+expect "hotkey: rerun" 0 "updated iTerm profile 'tmux': /opt/homebrew/bin/tmux -CC -> $H/.local/bin/iterm-tmux" run_install
+expect_eq "hotkey: only the tmux profile set" "set-profile-command --guid G1 --command $H/.local/bin/iterm-tmux" "$(grep set-profile "$FAKE_ITERM_LOG")"
+expect_eq "hotkey: old command backed up" "1" "$(grep -c $'^G1\ttmux\t/opt/homebrew/bin/tmux -CC$' "$H"/.agent-tmux/backups/*/iterm-profiles.tsv)"
+: > "$FAKE_ITERM_LOG"
+export FAKE_ITERM_OUT=$'G1\tYes\t'"$H/.local/bin/iterm-tmux"$'\ttmux'
+expect "hotkey: already set" 0 "ok      iTerm profile 'tmux' runs iterm-tmux" run_install
+expect_eq "hotkey: already set, not touched" "" "$(grep set-profile "$FAKE_ITERM_LOG" || true)"
+unset FAKE_ITERM_OUT
+FAKE_ITERM_CODE=3 expect "hotkey: no iTerm API" 0 "skipped iTerm hotkey profile" run_install
 t_done

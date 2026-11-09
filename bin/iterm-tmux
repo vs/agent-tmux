@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# iterm-tmux — command for an iTerm profile that would otherwise run a bare
+# `tmux -CC` (install.sh sets it on hotkey profiles). It reattaches the session
+# this profile last opened when nothing has it attached, so an iTerm restart,
+# upgrade or crash doesn't strand that session; otherwise it starts a new one,
+# like `tmux -CC` does.
+set -u
+
+for _d in /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$_d:"*) ;; *) PATH="$PATH:$_d" ;; esac
+done
+export PATH
+
+state="${ITERM_TMUX_STATE:-$HOME/.agent-tmux/hotkey-session}"
+
+s=$(cat "$state" 2>/dev/null || true)
+if [[ -n "$s" ]] && tmux has-session -t "=$s" 2>/dev/null &&
+   [[ -z "$(tmux list-clients -t "=$s" -F x 2>/dev/null)" ]]; then
+  exec tmux -CC attach-session -t "=$s"
+fi
+
+if s=$(tmux new-session -d -P -F '#{session_name}' 2>/dev/null) && [[ -n "$s" ]]; then
+  mkdir -p "$(dirname "$state")"
+  printf '%s\n' "$s" > "$state.tmp.$$" && mv "$state.tmp.$$" "$state"
+  exec tmux -CC attach-session -t "=$s"
+fi
+exec tmux -CC

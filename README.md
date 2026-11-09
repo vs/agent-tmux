@@ -9,12 +9,13 @@ talk to each other, and ask Codex for a review with one command.
 | `skills/smux` | Skill for Claude Code and Codex that teaches the `tmux-bridge` protocol (vendored from smux). |
 | `skills/codex-review` | Claude Code skill: `/agent-tmux:codex-review [extra focus]` asks the Codex session in the same window to review your changes. |
 | `bin/swarm` | CLI that runs a swarm of Claude sessions as iTerm tabs, one tab per project, over tmux. |
-| `bin/swarm-iterm.py` | iTerm2 Python API helper: places tabs and detects the hotkey window. |
+| `bin/swarm-iterm.py` | iTerm2 Python API helper: places tabs, detects the hotkey window, and reads and sets hotkey profile commands. |
 | `lib/swarm/` | Shell modules behind `swarm` (config, open, delegate, layout, status, watch). |
 | `skills/swarm` | Claude Code skill that teaches an orchestrator to use `swarm delegate`. |
 | `bin/agents-restart` | CLI that restarts upgraded Claude, Codex and Gemini agents in their tmux panes, resuming the same conversation. |
 | `bin/agents-restart-argv` | Python helper for `agents-restart` that prints a process's exact argv (NUL-separated), so arguments with spaces or quotes survive into the resume command. |
 | `lib/agents-restart/` | Shell modules behind `agents-restart` (discovery, state, session ids, restart flow, live UI). |
+| `bin/iterm-tmux` | Command for an iTerm hotkey profile: reattaches the session the hotkey last showed instead of starting a new one. |
 | `raycast/agents-restart.sh` | Raycast script command, **Restart Agents**: runs `agents-restart -y` and shows its colored output. |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
@@ -44,6 +45,7 @@ It needs `tmux` (3.2+) and `jq`, and:
 - links `config/tmux.conf` to `~/.agent-tmux/tmux.conf` and adds `source-file -q ~/.agent-tmux/tmux.conf` to `~/.tmux.conf`, unless a line already sources that path. The line names no repo path, so a dotfiles repo can carry it (`-q`: no error where agent-tmux isn't installed). A `source-file "<repo>/config/tmux.conf"` line from an earlier version is swapped for it in place (backup under `~/.agent-tmux/backups`);
 - links `bin/swarm` into `~/.local/bin` and copies `config/swarm.conf.example` to `~/.agent-tmux/swarm.conf` if you have none (never overwritten);
 - links `bin/agents-restart` into `~/.local/bin`;
+- links `bin/iterm-tmux` into `~/.local/bin`, and points any iTerm hotkey profile whose command is a bare `tmux -CC` at `~/.local/bin/iterm-tmux` (through the iTerm API, so iTerm must be open; the old command is saved in `~/.agent-tmux/backups/<timestamp>/iterm-profiles.tsv`; `AGENT_TMUX_SKIP_ITERM=1` skips it);
 - creates `~/.agent-tmux/venv` with the `iterm2` package for tab placement (a failure only warns; `AGENT_TMUX_SKIP_VENV=1` skips it);
 - allows `Bash(tmux-bridge:*)` and `Bash(swarm <open|delegate|status|peek|report|watch|layout|config>:*)` in `~/.claude/settings.json`, but not `swarm close`, so killing a running lieutenant always asks;
 - adds `prefix_rule(pattern=["tmux-bridge"], decision="allow")` to `~/.codex/rules/default.rules`, so Codex runs `tmux-bridge` without asking and outside its sandbox (which can't reach the tmux socket).
@@ -115,6 +117,10 @@ Output is plain (no colors, spinners or redraws) when stdout isn't a terminal or
 `raycast/agents-restart.sh` is a Raycast script command, **Restart Agents**, that runs `agents-restart -y` and shows its output, in color, in Raycast's full-output view. To add it, open Raycast Settings → Script Commands → Add Script Directory and choose this repo's `raycast/` folder (if the command doesn't show up, run Reload Script Directories). Rows appear as each agent finishes; there are no live spinners. Closing the view stops waiting for busy agents; a restart already under way still completes.
 
 The script sets up `PATH` itself (Raycast starts scripts with a bare one): `~/.local/bin`, Homebrew, and mise's tools via `mise env`, so it finds the same `claude`, `codex` and `gemini` as your shell.
+
+## The iTerm hotkey window
+
+A hotkey profile running a bare `tmux -CC` starts a new session every time it opens, so after an iTerm restart the session it showed is left detached, out of view. With `iterm-tmux` as its command (set by `install.sh`), the hotkey profile reattaches the session it last opened, kept in `~/.agent-tmux/hotkey-session`, whenever nothing else has that session attached; otherwise it starts a new session, as `tmux -CC` does. So the hotkey's session comes back after iTerm restarts, crashes or updates itself.
 
 ## /agent-tmux:codex-review
 

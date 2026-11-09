@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""iTerm2 helper for swarm. Run with `python -I swarm-iterm.py <cmd>`.
+"""iTerm2 helper for swarm and install.sh. Run with `python -I swarm-iterm.py <cmd>`.
 
 plan-order is pure. The other commands import iterm2 lazily and exit 3 with
 `swarm-iterm: <reason>` on stderr when the API is unavailable.
@@ -81,6 +81,23 @@ async def _new_window(iterm2, conn, session):
     )
 
 
+async def _hotkey_profiles(iterm2, conn):
+    props = ["Guid", "Name", "Has Hotkey", "Custom Command", "Command"]
+    for p in await iterm2.PartialProfile.async_query(conn, properties=props):
+        if not p._simple_get("Has Hotkey"):
+            continue
+        fields = [p.guid, p._simple_get("Custom Command"), p._simple_get("Command"), p.name]
+        print("\t".join(str(f or "").replace("\t", " ") for f in fields))
+
+
+async def _set_profile_command(iterm2, conn, guid, command):
+    found = await iterm2.PartialProfile.async_query(conn, guids=[guid], properties=["Guid"])
+    if not found:
+        raise RuntimeError("no profile with guid %s" % guid)
+    await found[0].async_set_use_custom_command("Yes")
+    await found[0].async_set_command(command)
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="swarm-iterm")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -94,6 +111,10 @@ def main(argv):
     sub.add_parser("hotkey-windows")
     nw = sub.add_parser("new-window")
     nw.add_argument("--session", required=True)
+    sub.add_parser("hotkey-profiles")
+    sp = sub.add_parser("set-profile-command")
+    sp.add_argument("--guid", required=True)
+    sp.add_argument("--command", required=True)
     a = p.parse_args(argv)
 
     if a.cmd == "plan-order":
@@ -107,6 +128,10 @@ def main(argv):
         run_api(_hotkey)
     elif a.cmd == "new-window":
         run_api(lambda i2, c: _new_window(i2, c, a.session))
+    elif a.cmd == "hotkey-profiles":
+        run_api(_hotkey_profiles)
+    elif a.cmd == "set-profile-command":
+        run_api(lambda i2, c: _set_profile_command(i2, c, a.guid, a.command))
 
 
 if __name__ == "__main__":

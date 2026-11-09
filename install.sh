@@ -44,6 +44,7 @@ link() {
 link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
 link "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
 link "$REPO/bin/agents-restart" "$HOME/.local/bin/agents-restart"
+link "$REPO/bin/iterm-tmux" "$HOME/.local/bin/iterm-tmux"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
 
 # Earlier versions linked the skills into ~/.claude/skills; with the plugin
@@ -117,6 +118,37 @@ else
     info "installed iterm2 into $venv"
   else
     info "warning: could not install iterm2 into $venv; iTerm tab placement and hotkey detection are disabled"
+  fi
+fi
+
+# --- iTerm: hotkey profiles reattach their tmux session ---
+# A hotkey profile running a bare `tmux -CC` starts a new session each time,
+# stranding the old one after an iTerm restart; iterm-tmux reattaches it.
+
+if [[ "${AGENT_TMUX_SKIP_ITERM:-0}" == 1 ]]; then
+  info "skipped iTerm hotkey profile (AGENT_TMUX_SKIP_ITERM=1)"
+else
+  SWARM_ROOT="$REPO"
+  # shellcheck disable=SC1091
+  source "$REPO/lib/swarm/iterm.sh"
+  wrapper="$HOME/.local/bin/iterm-tmux"
+  if ! profiles=$(swarm_iterm hotkey-profiles 2>/dev/null); then
+    info "skipped iTerm hotkey profile: the iTerm API isn't reachable (iTerm closed, its Python API off, or a dialog open); re-run install.sh to set it"
+  else
+    while IFS=$'\t' read -r guid custom cmd name; do
+      [[ -n "$guid" && "$custom" == Yes ]] || continue
+      if [[ "$cmd" == "$wrapper" ]]; then
+        info "ok      iTerm profile '$name' runs iterm-tmux"
+      elif [[ "$cmd" =~ ^([^[:space:]]*/)?tmux[[:space:]]+-CC[[:space:]]*$ ]]; then
+        mkdir -p "$BACKUP_DIR"
+        printf '%s\t%s\t%s\n' "$guid" "$name" "$cmd" >> "$BACKUP_DIR/iterm-profiles.tsv"
+        if swarm_iterm set-profile-command --guid "$guid" --command "$wrapper"; then
+          info "updated iTerm profile '$name': $cmd -> $wrapper (old command in $BACKUP_DIR/iterm-profiles.tsv)"
+        else
+          info "warning: could not update iTerm profile '$name'"
+        fi
+      fi
+    done <<<"$profiles"
   fi
 fi
 
