@@ -19,6 +19,7 @@ talk to each other, and ask Codex for a review with one command.
 | `bin/iterm-tmux` | Command for an iTerm hotkey profile: reattaches the session the hotkey last showed instead of starting a new one. |
 | `lib/iterm-upgrade/` | Shell modules behind `iterm-upgrade` (snapshot, app control, flow). |
 | `raycast/agents-restart.sh` | Raycast script command, **Restart Agents**: runs `agents-restart -y` and shows its colored output. |
+| `raycast/iterm-upgrade.sh` | Raycast script command, **Upgrade iTerm2**: runs `iterm-upgrade -y` (or a dry run, a plain restart, or a reattach) and shows its output. |
 | `config/swarm.conf.example` | Starter swarm config, copied to `~/.agent-tmux/swarm.conf` by `install.sh`. |
 | `config/tmux.conf` | Shows pane labels (`tmux-bridge name`) in pane borders, and re-tiles swarm tabs when panes split or close. |
 | `.claude-plugin/` | Makes the repo a Claude Code plugin and its own marketplace. |
@@ -143,6 +144,12 @@ Once the clients are detached, iTerm always comes back, even if the upgrade fail
 Run it from a tmux pane, which keeps running while iTerm is down; you'll find its output there after reattaching. Running it from outside iTerm, for example from Raycast, also works. A plain iTerm tab is refused, because it closes with iTerm. Agents running in plain iTerm tabs, outside tmux, end when iTerm quits: they're listed before you confirm, and `-y` refuses to go on while there are any.
 
 It needs iTerm2 installed with Homebrew (`--no-upgrade` works either way), `tmux`, `jq`, and the iTerm helper venv for opening windows (without it, it falls back to AppleScript).
+
+### From Raycast
+
+`raycast/iterm-upgrade.sh` is a Raycast script command, **Upgrade iTerm2**. It's in the same `raycast/` folder as Restart Agents, so once that folder is a script directory (Raycast Settings → Script Commands → Add Script Directory; run Reload Script Directories if it doesn't show up), it's there. Its optional dropdown picks **Upgrade** (the default: `iterm-upgrade -y`), **Dry run**, **Restart only** (`--no-upgrade`) or **Reattach** (`--reattach`).
+
+Raycast runs outside iTerm, so its output view stays up through the restart and shows Homebrew's progress live. Running the command is the confirmation (Raycast has no terminal to ask in), but it still refuses while agents run outside tmux. The first run may ask to let Raycast control iTerm2: allow it. Keep the output view open until it finishes: closing it may stop the run partway. If iTerm doesn't come back, open it and run **Reattach**.
 
 ### The hotkey window
 
