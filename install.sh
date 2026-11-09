@@ -44,6 +44,7 @@ link() {
 link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
 link "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
 link "$REPO/bin/agents-restart" "$HOME/.local/bin/agents-restart"
+link "$REPO/bin/iterm-upgrade" "$HOME/.local/bin/iterm-upgrade"
 link "$REPO/bin/iterm-tmux" "$HOME/.local/bin/iterm-tmux"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
 

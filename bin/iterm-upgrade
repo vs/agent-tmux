@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# iterm-upgrade — upgrade iTerm2 with Homebrew, restart it, and reattach the
+# tmux sessions it showed, so every agent comes back in its window, tab and pane.
+set -euo pipefail
+
+for _d in /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$_d:"*) ;; *) PATH="$PATH:$_d" ;; esac
+done
+export PATH
+unset _d
+
+# Resolve symlinks (macOS has no readlink -f) to find the repo root.
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+  _dir=$(cd "$(dirname "$_src")" && pwd)
+  _src=$(readlink "$_src")
+  [[ "$_src" == /* ]] || _src="$_dir/$_src"
+done
+IU_ROOT=$(cd "$(dirname "$_src")/.." && pwd)
+unset _src _dir
+
+SWARM_ROOT="$IU_ROOT"
+# shellcheck disable=SC1091
+source "$IU_ROOT/lib/agents-restart/common.sh"
+# shellcheck disable=SC1091
+source "$IU_ROOT/lib/agents-restart/discover.sh"
+# shellcheck disable=SC1091
+source "$IU_ROOT/lib/swarm/iterm.sh"
+for _f in common app main; do
+  # shellcheck disable=SC1090
+  source "$IU_ROOT/lib/iterm-upgrade/$_f.sh"
+done
+unset _f
+
+iu_usage() {
+  cat <<'EOF'
+usage: iterm-upgrade [-y] [--no-upgrade] [--dry-run] [--reattach] [-h|--help]
+
+Upgrades iTerm2 with Homebrew, restarts it, and reattaches the tmux sessions
+it showed. Agents in tmux keep running throughout.
+
+  -y            don't ask for confirmation
+  --no-upgrade  only restart iTerm2 and reattach
+  --dry-run     show the plan; change nothing
+  --reattach    reattach the sessions saved by the last run
+EOF
+}
+
+IU_YES=0
+IU_UPGRADE=1
+IU_DRY_RUN=0
+IU_REATTACH=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y) IU_YES=1 ;;
+    --no-upgrade) IU_UPGRADE=0 ;;
+    --dry-run) IU_DRY_RUN=1 ;;
+    --reattach) IU_REATTACH=1 ;;
+    -h|--help) iu_usage; exit 0 ;;
+    *) iu_usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+iu_main
