@@ -10,7 +10,6 @@ iu_warn() { echo "iterm-upgrade: warning: $*" >&2; }
 
 iu_dir() { echo "${ITERM_UPGRADE_DIR:-$HOME/.agent-tmux/iterm-upgrade}"; }
 iu_app() { echo "${ITERM_UPGRADE_APP:-/Applications/iTerm.app}"; }
-iu_hotkey_state() { echo "${ITERM_TMUX_STATE:-$HOME/.agent-tmux/hotkey-session}"; }
 
 # iu_log <text...> -> appends a line to the run's log.
 iu_log() { echo "$*" >> "$IU_LOG"; }
@@ -159,17 +158,22 @@ iu_detached_sessions() {
 
 # --- iTerm hotkey window ---
 
-# iu_wrapper_installed -> 0 when a hotkey profile runs iterm-tmux.
-iu_wrapper_installed() {
-  iu_iterm hotkey-profiles |
-    awk -F'\t' '$2 == "Yes" && $3 ~ /(^|\/)iterm-tmux$/ { found = 1 } END { exit !found }'
+# iu_hotkey_profile_session -> NAME when a hotkey profile reattaches tmux
+# session NAME (`tmux -CC new-session -A -s NAME`, as install.sh sets it),
+# else nothing.
+iu_hotkey_profile_session() {
+  local guid custom cmd name s
+  while IFS="$IU_TAB" read -r guid custom cmd name; do
+    [[ "$custom" == Yes ]] || continue
+    s=$(iterm_profile_session "$cmd")
+    if [[ -n "$s" ]]; then echo "$s"; return; fi
+  done < <(iu_iterm hotkey-profiles || true)
 }
 
 # iu_hotkey_session <snapshot file> -> the session (default server, -CC) that
-# iTerm's hotkey window shows, or nothing. Falls back to the session
-# iterm-tmux last opened when the iTerm API can't tell.
+# iTerm's hotkey window shows, or nothing (also when the iTerm API can't tell).
 iu_hotkey_session() {
-  local snap="$1" ids id name s
+  local snap="$1" ids id name
   ids=$(iu_iterm hotkey-windows || true)
   for id in $ids; do
     name=$(ar_tmux - display-message -p -t "$id" '#{session_name}' 2>/dev/null </dev/null) || continue
@@ -178,9 +182,4 @@ iu_hotkey_session() {
       return
     fi
   done
-  [[ -z "$ids" ]] || return 0
-  s=$(cat "$(iu_hotkey_state)" 2>/dev/null || true)
-  if [[ -n "$s" ]] && awk -F'\t' -v s="$s" '$1 == "-" && $2 == s && $3 == "cc" { f = 1 } END { exit !f }' "$snap"; then
-    echo "$s"
-  fi
 }

@@ -45,7 +45,6 @@ link "$REPO/bin/tmux-bridge" "$HOME/.local/bin/tmux-bridge"
 link "$REPO/bin/swarm" "$HOME/.local/bin/swarm"
 link "$REPO/bin/agents-restart" "$HOME/.local/bin/agents-restart"
 link "$REPO/bin/iterm-upgrade" "$HOME/.local/bin/iterm-upgrade"
-link "$REPO/bin/iterm-tmux" "$HOME/.local/bin/iterm-tmux"
 link "$REPO/skills/smux" "$HOME/.codex/skills/smux"
 
 # Earlier versions linked the skills into ~/.claude/skills; with the plugin
@@ -122,9 +121,20 @@ else
   fi
 fi
 
-# --- iTerm: hotkey profiles reattach their tmux session ---
+# --- iTerm: hotkey profiles reattach a named tmux session ---
 # A hotkey profile running a bare `tmux -CC` starts a new session each time,
-# stranding the old one after an iTerm restart; iterm-tmux reattaches it.
+# stranding the old one after an iTerm restart. `tmux -CC new-session -A -s
+# <name>` reattaches it by name (creating it the first time) and needs nothing
+# but tmux, so iTerm prefs restored by a dotfiles repo work on a machine
+# without agent-tmux. The session the hotkey shows now is renamed to <name>.
+
+# Earlier versions pointed the profile at a wrapper linked into this repo.
+old_wrapper="$HOME/.local/bin/iterm-tmux"
+if [[ -L "$old_wrapper" && "$(readlink "$old_wrapper")" == "$REPO/bin/iterm-tmux" ]]; then
+  rm "$old_wrapper"
+  info "removed $old_wrapper (hotkey profiles run tmux directly now)"
+fi
+rm -f "$HOME/.agent-tmux/hotkey-session"
 
 if [[ "${AGENT_TMUX_SKIP_ITERM:-0}" == 1 ]]; then
   info "skipped iTerm hotkey profile (AGENT_TMUX_SKIP_ITERM=1)"
@@ -132,24 +142,40 @@ else
   SWARM_ROOT="$REPO"
   # shellcheck disable=SC1091
   source "$REPO/lib/swarm/iterm.sh"
-  wrapper="$HOME/.local/bin/iterm-tmux"
+  hot_session="${AGENT_TMUX_HOTKEY_SESSION:-main}"
+  want="$(command -v tmux) -CC new-session -A -s $hot_session"
   if ! profiles=$(swarm_iterm hotkey-profiles 2>/dev/null); then
     info "skipped iTerm hotkey profile: the iTerm API isn't reachable (iTerm closed, its Python API off, or a dialog open); re-run install.sh to set it"
   else
+    hot_set=0
     while IFS=$'\t' read -r guid custom cmd name; do
       [[ -n "$guid" && "$custom" == Yes ]] || continue
-      if [[ "$cmd" == "$wrapper" ]]; then
-        info "ok      iTerm profile '$name' runs iterm-tmux"
-      elif [[ "$cmd" =~ ^([^[:space:]]*/)?tmux[[:space:]]+-CC[[:space:]]*$ ]]; then
+      named=$(iterm_profile_session "$cmd")
+      if [[ "$named" == "$hot_session" ]]; then
+        info "ok      iTerm profile '$name' reattaches tmux session '$hot_session'"
+        hot_set=1
+      elif [[ -n "$named" ]]; then
+        info "ok      iTerm profile '$name' reattaches tmux session '$named' (left as is)"
+      elif [[ "$cmd" =~ ^([^[:space:]]*/)?tmux[[:space:]]+-CC[[:space:]]*$ || "$cmd" == */iterm-tmux ]]; then
         mkdir -p "$BACKUP_DIR"
         printf '%s\t%s\t%s\n' "$guid" "$name" "$cmd" >> "$BACKUP_DIR/iterm-profiles.tsv"
-        if swarm_iterm set-profile-command --guid "$guid" --command "$wrapper"; then
-          info "updated iTerm profile '$name': $cmd -> $wrapper (old command in $BACKUP_DIR/iterm-profiles.tsv)"
+        if swarm_iterm set-profile-command --guid "$guid" --command "$want"; then
+          info "updated iTerm profile '$name': $cmd -> $want (old command in $BACKUP_DIR/iterm-profiles.tsv)"
+          hot_set=1
         else
           info "warning: could not update iTerm profile '$name'"
         fi
       fi
     done <<<"$profiles"
+    # The hotkey's next open should find its current session under the new name.
+    if [[ $hot_set == 1 ]] && ! tmux has-session -t "=$hot_session" 2>/dev/null; then
+      hot_id=$(swarm_iterm hotkey-windows 2>/dev/null | awk '{ print $1 }') || hot_id=""
+      cur=""
+      [[ -z "$hot_id" ]] || cur=$(tmux display-message -p -t "$hot_id" '#{session_name}' 2>/dev/null) || cur=""
+      if [[ -n "$cur" ]] && tmux rename-session -t "=$cur" "$hot_session"; then
+        info "renamed tmux session '$cur' (shown in the hotkey window) to '$hot_session'"
+      fi
+    fi
   fi
 fi
 

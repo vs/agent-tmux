@@ -19,3 +19,13 @@ swarm_iterm() {
   fi
   "$py" -I "$script" "$@"
 }
+
+# iterm_profile_session <command> -> NAME when an iTerm profile command
+# attaches tmux session NAME over -CC, creating it when missing
+# (`tmux -CC new-session -A -s NAME`, or `new`, `-s NAME -A`); else nothing.
+iterm_profile_session() {
+  local ws='[[:space:]]+' re
+  re="^([^[:space:]]*/)?tmux${ws}-CC${ws}new(-session)?${ws}(-A${ws}-s${ws}([^[:space:]]+)|-s${ws}([^[:space:]]+)${ws}-A)[[:space:]]*\$"
+  [[ "$1" =~ $re ]] || return 0
+  echo "${BASH_REMATCH[4]:-${BASH_REMATCH[5]}}"
+}

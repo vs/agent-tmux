@@ -2,7 +2,7 @@
 # reattach. Sourced after app.sh; bash 3.2 compatible.
 #
 # State file rows ($IU_STATE): sock<TAB>session<TAB>mode<TAB>role, where role
-# is "hotkey" (iterm-tmux brings it back when the hotkey is pressed) or
+# is "hotkey" (the hotkey profile reattaches it when the hotkey is pressed) or
 # "window" (reopened in a new iTerm window).
 
 # iu_reattach_rows <state file> -> reattaches every row and prints one line
@@ -124,18 +124,18 @@ iu_main() {
   fi
   ! iu_running || running=1
 
-  local snap="$IU_TMP/snap" rows="$IU_TMP/rows" hotkey="" wrapper=0 strays sock sess mode client role n
+  local snap="$IU_TMP/snap" rows="$IU_TMP/rows" hotkey="" profile="" strays sock sess mode client role n
   : > "$snap"; : > "$rows"
   if [[ $running == 1 ]]; then
     iu_snapshot > "$snap"
     if [[ -s "$snap" ]]; then
       hotkey=$(iu_hotkey_session "$snap")
-      if [[ -n "$hotkey" ]] && iu_wrapper_installed; then wrapper=1; fi
+      [[ -z "$hotkey" ]] || profile=$(iu_hotkey_profile_session)
     fi
   fi
   while IFS="$IU_TAB" read -r sock sess mode client; do
     role=window
-    [[ $wrapper == 1 && "$sock" == "-" && "$sess" == "$hotkey" ]] && role=hotkey
+    [[ -n "$hotkey" && "$sock" == "-" && "$sess" == "$hotkey" && "$profile" == "$hotkey" ]] && role=hotkey
     printf '%s\t%s\t%s\t%s\n' "$sock" "$sess" "$mode" "$role" >> "$rows"
   done < "$snap"
   strays=$(iu_stray_agents)
@@ -162,9 +162,12 @@ iu_main() {
       fi
     done < "$rows"
   fi
-  if [[ -n "$hotkey" && $wrapper == 0 ]]; then
-    echo "  (your hotkey profile runs a bare \`tmux -CC\`, so session $hotkey gets a normal window;"
+  if [[ -n "$hotkey" && -z "$profile" ]]; then
+    echo "  (your hotkey profile doesn't reattach a named session, so session $hotkey gets a normal window;"
     echo "   run install.sh to have the hotkey bring it back instead)"
+  elif [[ -n "$hotkey" && "$profile" != "$hotkey" ]]; then
+    echo "  (your hotkey profile reattaches session '$profile', but the hotkey window shows '$hotkey',"
+    echo "   so '$hotkey' gets a normal window; run install.sh to rename it to '$profile')"
   fi
   local detached
   detached=$(iu_detached_sessions | awk -F'\t' '{ printf "%s%s", sep, ($1 == "-" ? $2 : $2 " (-L " $1 ")"); sep = ", " }')
@@ -191,10 +194,6 @@ iu_main() {
     echo "iterm-upgrade $(date '+%Y-%m-%d %H:%M:%S'): $cur -> ${target:-restart}"
     sed 's/^/state: /' "$IU_STATE"
   } > "$IU_LOG"
-  if [[ -n "$hotkey" && $wrapper == 1 ]]; then
-    mkdir -p "$(dirname "$(iu_hotkey_state)")"
-    printf '%s\n' "$hotkey" > "$(iu_hotkey_state)"
-  fi
   IU_PENDING=1
   trap 'echo; echo "Interrupted: bringing iTerm2 back…"; IU_PENDING=0; iu_finish; exit 130' INT TERM
   [[ $running == 0 ]] || echo "Detaching iTerm from tmux and quitting it (your agents keep running)…"

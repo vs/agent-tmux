@@ -16,7 +16,6 @@ talk to each other, and ask Codex for a review with one command.
 | `bin/agents-restart-argv` | Python helper for `agents-restart` that prints a process's exact argv (NUL-separated), so arguments with spaces or quotes survive into the resume command. |
 | `lib/agents-restart/` | Shell modules behind `agents-restart` (discovery, state, session ids, restart flow, live UI). |
 | `bin/iterm-upgrade` | CLI that upgrades iTerm2 with Homebrew, restarts it, and reattaches the tmux sessions it showed, so every agent comes back in its window, tab and pane. |
-| `bin/iterm-tmux` | Command for an iTerm hotkey profile: reattaches the session the hotkey last showed instead of starting a new one. |
 | `lib/iterm-upgrade/` | Shell modules behind `iterm-upgrade` (snapshot, app control, flow). |
 | `raycast/agents-restart.sh` | Raycast script command, **Restart Agents**: runs `agents-restart -y` and shows its colored output. |
 | `raycast/iterm-upgrade.sh` | Raycast script command, **Upgrade iTerm2**: runs `iterm-upgrade -y` (or a dry run, a plain restart, or a reattach) and shows its output. |
@@ -48,7 +47,7 @@ It needs `tmux` (3.2+) and `jq`, and:
 - links `config/tmux.conf` to `~/.agent-tmux/tmux.conf` and adds `source-file -q ~/.agent-tmux/tmux.conf` to `~/.tmux.conf`, unless a line already sources that path. The line names no repo path, so a dotfiles repo can carry it (`-q`: no error where agent-tmux isn't installed). A `source-file "<repo>/config/tmux.conf"` line from an earlier version is swapped for it in place (backup under `~/.agent-tmux/backups`);
 - links `bin/swarm` into `~/.local/bin` and copies `config/swarm.conf.example` to `~/.agent-tmux/swarm.conf` if you have none (never overwritten);
 - links `bin/agents-restart` into `~/.local/bin`;
-- links `bin/iterm-upgrade` and `bin/iterm-tmux` into `~/.local/bin`, and points any iTerm hotkey profile whose command is a bare `tmux -CC` at `~/.local/bin/iterm-tmux` (through the iTerm API, so iTerm must be open; the old command is saved in `~/.agent-tmux/backups/<timestamp>/iterm-profiles.tsv`; `AGENT_TMUX_SKIP_ITERM=1` skips it);
+- links `bin/iterm-upgrade` into `~/.local/bin`, and changes any iTerm hotkey profile whose command is a bare `tmux -CC` to `tmux -CC new-session -A -s main`, renaming the session the hotkey window shows to `main` (see [The hotkey window](#the-hotkey-window); through the iTerm API, so iTerm must be open; the old command is saved in `~/.agent-tmux/backups/<timestamp>/iterm-profiles.tsv`; `AGENT_TMUX_HOTKEY_SESSION` picks another name, `AGENT_TMUX_SKIP_ITERM=1` skips it);
 - creates `~/.agent-tmux/venv` with the `iterm2` package for tab placement (a failure only warns; `AGENT_TMUX_SKIP_VENV=1` skips it);
 - allows `Bash(tmux-bridge:*)` and `Bash(swarm <open|delegate|status|peek|report|watch|layout|config>:*)` in `~/.claude/settings.json`, but not `swarm close`, so killing a running lieutenant always asks;
 - adds `prefix_rule(pattern=["tmux-bridge"], decision="allow")` to `~/.codex/rules/default.rules`, so Codex runs `tmux-bridge` without asking and outside its sandbox (which can't reach the tmux socket).
@@ -137,7 +136,7 @@ iterm-upgrade --reattach    # reattach what the last run saved (if something wen
 2. Records every tmux session iTerm has attached: `-CC` integration clients, and plain `tmux attach` clients running in iTerm tabs, on the default server and on `$SWARM_TMUX_SOCKET`. Detached sessions are listed and left as they are.
 3. Detaches those clients (iTerm closes their windows; the tmux windows and their agents keep running), then quits iTerm2. If iTerm is still running 30 seconds later (an unanswered quit dialog), it gets a SIGTERM.
 4. Upgrades the app while it isn't running. If your mise config declares it in `mise bootstrap` (`"brew-cask:iterm2" = "latest"`), it runs `mise bootstrap packages upgrade brew-cask:iterm2` first, from `$HOME` so the global config applies. mise upgrades a self-updating cask like iTerm2 only while the app is closed, and leaves a cask that Homebrew installed (`managed_by: homebrew`, as with `[bootstrap.brew] homebrew_metadata = true`) to Homebrew. Then, or without mise, it runs `brew upgrade --cask --greedy iterm2`, and `brew reinstall --cask iterm2` if the app on disk is still the old version (brew can record an upgrade it couldn't apply). The output goes to `~/.agent-tmux/iterm-upgrade/last.log`, and with mise, the run ends with what `mise bootstrap packages status` reports for iterm2.
-5. Starts iTerm2 and reopens each session in a new window (`tmux -CC attach`), with all its tabs and panes. The hotkey window's session isn't reopened: press your hotkey and `iterm-tmux` attaches it. A macOS notification says when iTerm is back.
+5. Starts iTerm2 and reopens each session in a new window (`tmux -CC attach`), with all its tabs and panes. The hotkey window's session isn't reopened: press your hotkey and its profile reattaches it. A macOS notification says when iTerm is back.
 
 Once the clients are detached, iTerm always comes back, even if the upgrade fails or you press Ctrl+C.
 
@@ -153,7 +152,11 @@ Raycast runs outside iTerm, so its output view stays up through the restart and 
 
 ### The hotkey window
 
-With `iterm-tmux` as its command (set by `install.sh`), the hotkey profile reattaches the session it last opened, kept in `~/.agent-tmux/hotkey-session`, whenever nothing else has that session attached; otherwise it starts a new session, as `tmux -CC` does. This also brings the hotkey's session back after an iTerm crash or an in-app (Sparkle) update.
+A hotkey profile running a bare `tmux -CC` starts a new session every time it opens, so after an iTerm restart the session it showed stays detached, out of view. `install.sh` changes its command to `tmux -CC new-session -A -s main`: it attaches the session named `main`, creating it the first time, and the session the hotkey shows when you install is renamed to `main`. After an upgrade, a crash or an in-app (Sparkle) update, the hotkey brings that session back.
+
+The command needs nothing but tmux, no file from this repo, so iTerm prefs kept in a dotfiles repo still work on a new machine before agent-tmux is installed. `iterm-upgrade` treats the hotkey's session as the hotkey's when the profile names it this way (`new-session -A -s <name>` or `new -s <name> -A`).
+
+Earlier versions pointed the profile at a `~/.local/bin/iterm-tmux` wrapper; `install.sh` replaces that command too, and removes the link.
 
 ## /agent-tmux:codex-review
 

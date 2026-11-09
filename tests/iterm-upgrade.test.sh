@@ -13,7 +13,6 @@ trap 'tmux kill-server 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 export ITERM_UPGRADE_APP="$WORK/iTerm.app"
 export ITERM_UPGRADE_DIR="$WORK/iu"
-export ITERM_TMUX_STATE="$WORK/hotkey-session"
 export ITERM_UPGRADE_NOTIFY=0
 export ITERM_UPGRADE_PS="$WORK/ps"
 export ITERM_UPGRADE_QUIT_TIMEOUT=2
@@ -101,7 +100,7 @@ esac
 EOF
 export FAKE_RUNNING="$WORK/running"
 export SWARM_ITERM_HELPER="$WORK/bin/fake-iterm"
-WRAPPER_PROFILE=$'G1\tYes\t'"$HOME/.local/bin/iterm-tmux"$'\ttmux'
+HOTKEY_PROFILE=$'G1\tYes\t/opt/homebrew/bin/tmux -CC new-session -A -s main\ttmux'
 
 session() { tmux new-session -d -s "$1" -x 80 -y 24 /bin/sh; }
 cc_attach() { (sleep 20 | tmux -C attach-session -t "=$1" >/dev/null 2>&1) & t_wait 5 attached "$1"; }
@@ -114,11 +113,11 @@ iu() { "$T_REPO/bin/iterm-upgrade" "$@" </dev/null; }
 reset() {
   tmux kill-server 2>/dev/null || true
   sleep 0.2
-  rm -rf "$ITERM_UPGRADE_DIR" "$ITERM_TMUX_STATE"
+  rm -rf "$ITERM_UPGRADE_DIR"
   : > "$FAKE_LOG"; : > "$ITERM_UPGRADE_PS"
   set_app_version 3.7.6
   touch "$FAKE_RUNNING"
-  export FAKE_BREW_VERSION=3.7.7 FAKE_BREW_WORKS=upgrade FAKE_PROFILES="$WRAPPER_PROFILE"
+  export FAKE_BREW_VERSION=3.7.7 FAKE_BREW_WORKS=upgrade FAKE_PROFILES="$HOTKEY_PROFILE"
   unset FAKE_NOQUIT FAKE_BREW_NOCASK FAKE_PING_CODE FAKE_MISE_STATUS FAKE_MISE_UPGRADES
   session main; session work; session idle
   tmux new-window -d -t "=main:"
@@ -138,7 +137,9 @@ expect_eq "dry run: still running" "1" "$([[ -e "$FAKE_RUNNING" ]] && attached m
 expect_eq "dry run: no brew update or upgrade" "" "$(grep -E 'brew (update|upgrade)' "$FAKE_LOG" || true)"
 
 FAKE_PROFILES=$'G1\tYes\t/opt/homebrew/bin/tmux -CC\ttmux' \
-  expect "no wrapper: hotkey gets a window" 0 "run install.sh to have the hotkey bring it back" iu --dry-run
+  expect "bare tmux -CC: hotkey gets a window" 0 "run install.sh to have the hotkey bring it back" iu --dry-run
+FAKE_PROFILES=$'G1\tYes\ttmux -CC new-session -A -s other\ttmux' \
+  expect "profile names another session" 0 "run install.sh to rename it to 'other'" iu --dry-run
 
 expect "no terminal, no -y"  1 "pass -y" iu
 expect_eq "no -y: untouched" "1" "$(attached main && attached work && echo 1)"
@@ -176,7 +177,6 @@ expect_eq "upgrade: quit then open"   "quit|open" "$(grep -oE ' to quit|^open' "
 expect_eq "upgrade: work reattached"  "1" "$(t_wait 5 attached work && echo 1)"
 expect_eq "upgrade: work over -CC"    "1" "$(grep -c "attach-window --command $REAL_TMUX -CC attach-session -t =work" "$FAKE_LOG")"
 expect_eq "upgrade: main waits for hotkey" "0" "$(grep -c 'attach-session -t =main' "$FAKE_LOG")"
-expect_eq "upgrade: hotkey state"     "main" "$(cat "$ITERM_TMUX_STATE")"
 expect_eq "upgrade: idle left alone"  "" "$(tmux list-clients -t =idle 2>/dev/null)"
 expect_eq "upgrade: windows survive"  "2" "$(tmux list-windows -t =main | wc -l | tr -d ' ')"
 expect_eq "upgrade: state saved"      $'-\tmain\tcc\thotkey\n-\twork\tcc\twindow' "$(cat "$ITERM_UPGRADE_DIR/state")"
@@ -225,8 +225,7 @@ expect_eq "no-upgrade: no brew"      "" "$(grep "^brew" "$FAKE_LOG" || true)"
 expect_eq "no-upgrade: work back"    "1" "$(t_wait 5 attached work && echo 1)"
 
 reset
-FAKE_PROFILES="" expect "no wrapper: runs" 0 "main: reopened in a new window" iu -y --no-upgrade
-expect_eq "no wrapper: no hotkey state" "0" "$([[ -e "$ITERM_TMUX_STATE" ]] && echo 1 || echo 0)"
+FAKE_PROFILES="" expect "no hotkey profile: window instead" 0 "main: reopened in a new window" iu -y --no-upgrade
 
 reset
 FAKE_NOQUIT=1 expect "won't quit: error"     1 "iTerm2 didn't quit; skipping the upgrade" iu -y
