@@ -69,6 +69,21 @@ case "$1" in
     echo "iterm2 was successfully ${1}d" ;;
 esac
 EOF
+# mise: declares iterm2 when FAKE_MISE_STATUS is set; its upgrade only
+# changes the app when FAKE_MISE_UPGRADES=1 (a cask mise manages itself).
+fake mise <<'EOF'
+#!/usr/bin/env bash
+echo "mise $* (in $PWD)" >> "$FAKE_LOG"
+case "$*" in
+  "bootstrap packages status --json") echo "${FAKE_MISE_STATUS:-{\}}" ;;
+  "bootstrap packages upgrade --yes brew-cask:iterm2")
+    if [[ "${FAKE_MISE_UPGRADES:-0}" == 1 ]]; then
+      sed -i '' "s#<string>[^<]*</string>#<string>$FAKE_BREW_VERSION</string>#" "$ITERM_UPGRADE_APP/Contents/Info.plist"
+    else
+      echo "mise brew-cask:iterm2: installed and managed by Homebrew; leaving unchanged"
+    fi ;;
+esac
+EOF
 # iTerm helper: windows are -C clients; a hotkey window shows $FAKE_HOTKEY_IDS.
 fake fake-iterm <<'EOF'
 #!/usr/bin/env bash
@@ -104,7 +119,7 @@ reset() {
   set_app_version 3.7.6
   touch "$FAKE_RUNNING"
   export FAKE_BREW_VERSION=3.7.7 FAKE_BREW_WORKS=upgrade FAKE_PROFILES="$WRAPPER_PROFILE"
-  unset FAKE_NOQUIT FAKE_BREW_NOCASK FAKE_PING_CODE
+  unset FAKE_NOQUIT FAKE_BREW_NOCASK FAKE_PING_CODE FAKE_MISE_STATUS FAKE_MISE_UPGRADES
   session main; session work; session idle
   tmux new-window -d -t "=main:"
   cc_attach main; cc_attach work
@@ -173,6 +188,26 @@ expect_eq "reattach: work back"    "1" "$(t_wait 5 attached work && echo 1)"
 expect "reattach: hotkey hint"     0 "main: press your iTerm hotkey" iu --reattach
 rm -f "$ITERM_UPGRADE_DIR/state"
 expect "reattach: nothing saved"   1 "nothing saved to reattach" iu --reattach
+
+# declared in mise: mise first, from $HOME; brew when mise leaves it to Homebrew
+mise_status() {
+  printf '{"brew-cask":{"packages":[{"package":"iterm2","state":"installed","installed_version":"%s","auto_updates":true,"managed_by":"%s"}]}}' "$1" "$2"
+}
+reset
+FAKE_MISE_STATUS=$(mise_status 3.7.6 homebrew); export FAKE_MISE_STATUS
+expect "mise: plan names it" 0 "iTerm2 3.7.6 → 3.7.7 (mise brew-cask:iterm2, homebrew-managed)" iu --dry-run
+expect "mise, Homebrew-managed: falls back" 0 "mise left iterm2 to Homebrew" iu -y
+expect_eq "mise, Homebrew-managed: upgraded" "3.7.7" "$(app_version)"
+expect_eq "mise, Homebrew-managed: mise then brew" \
+  "mise bootstrap packages upgrade --yes brew-cask:iterm2 (in $HOME)|brew upgrade --cask --greedy iterm2" \
+  "$(grep -E '^(mise bootstrap packages upgrade|brew upgrade)' "$FAKE_LOG" | paste -sd '|' -)"
+reset
+FAKE_MISE_STATUS=$(mise_status 3.7.7 mise); export FAKE_MISE_STATUS
+out=$(FAKE_MISE_UPGRADES=1 iu -y 2>&1) || true
+expect_eq "mise-managed: mise upgrades it" "1" "$(grep -c 'iTerm2 upgraded: 3.7.6 → 3.7.7' <<<"$out")"
+expect_eq "mise-managed: status reported" "1" "$(grep -c 'mise bootstrap packages status: iterm2 installed 3.7.7' <<<"$out")"
+expect_eq "mise-managed: no brew upgrade" "" "$(grep -E '^brew (upgrade|reinstall)' "$FAKE_LOG" || true)"
+unset FAKE_MISE_STATUS
 
 reset
 FAKE_BREW_WORKS=reinstall expect "stale app: reinstalled" 0 "iTerm2 upgraded: 3.7.6 → 3.7.7" iu -y

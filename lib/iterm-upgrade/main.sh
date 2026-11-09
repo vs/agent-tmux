@@ -100,7 +100,8 @@ iu_main() {
     iu_die "run it from a tmux pane (it keeps running there while iTerm restarts) or from outside iTerm; a plain iTerm tab closes with iTerm"
   fi
 
-  local cur target="" running=0
+  local cur target="" running=0 via="Homebrew" entry
+  IU_MISE=0
   cur=$(iu_app_version)
   [[ -n "$cur" ]] || iu_die "iTerm2 not found at $(iu_app) (set ITERM_UPGRADE_APP)"
   if [[ "$IU_UPGRADE" == 1 ]]; then
@@ -108,6 +109,11 @@ iu_main() {
     if [[ "$IU_DRY_RUN" == 0 ]]; then
       echo "Checking Homebrew for a new iTerm2…"
       brew update --quiet >/dev/null 2>&1 </dev/null || iu_warn "brew update failed; using the formulae it already has"
+    fi
+    entry=$(iu_mise_entry)
+    if [[ -n "$entry" ]]; then
+      IU_MISE=1
+      via="mise brew-cask:iterm2, $(jq -r '.managed_by // "unknown"' <<<"$entry" 2>/dev/null)-managed"
     fi
     target=$(iu_brew_version)
     [[ -n "$target" ]] || iu_die "can't read the iterm2 cask version from brew"
@@ -136,7 +142,7 @@ iu_main() {
 
   # --- plan ---
   if [[ -n "$target" ]]; then
-    echo "iTerm2 $cur → $target (Homebrew)"
+    echo "iTerm2 $cur → $target ($via)"
   else
     echo "iTerm2 $cur: restart only"
   fi
@@ -206,6 +212,10 @@ iu_main() {
     echo "Upgrading iTerm2 to ${target}…"
     if iu_upgrade "$target"; then
       echo "iTerm2 upgraded: $cur → $target"
+      if [[ $IU_MISE == 1 ]]; then
+        entry=$(iu_mise_entry)
+        echo "mise bootstrap packages status: iterm2 $(jq -r '"\(.state) \(.installed_version // "?")"' <<<"$entry" 2>/dev/null)"
+      fi
     else
       echo "iterm-upgrade: error: iTerm2 is still $(iu_app_version); see $IU_LOG" >&2
       rc=1

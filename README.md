@@ -136,14 +136,14 @@ iterm-upgrade --reattach    # reattach what the last run saved (if something wen
 1. Checks Homebrew for a newer `iterm2` cask (`brew update`); if the installed app is already that version or newer, it stops there.
 2. Records every tmux session iTerm has attached: `-CC` integration clients, and plain `tmux attach` clients running in iTerm tabs, on the default server and on `$SWARM_TMUX_SOCKET`. Detached sessions are listed and left as they are.
 3. Detaches those clients (iTerm closes their windows; the tmux windows and their agents keep running), then quits iTerm2. If iTerm is still running 30 seconds later (an unanswered quit dialog), it gets a SIGTERM.
-4. Runs `brew upgrade --cask --greedy iterm2`, then `brew reinstall --cask iterm2` if the app on disk is still the old version (brew can record an upgrade it couldn't apply). Its output goes to `~/.agent-tmux/iterm-upgrade/last.log`.
+4. Upgrades the app while it isn't running. If your mise config declares it in `mise bootstrap` (`"brew-cask:iterm2" = "latest"`), it runs `mise bootstrap packages upgrade brew-cask:iterm2` first, from `$HOME` so the global config applies. mise upgrades a self-updating cask like iTerm2 only while the app is closed, and leaves a cask that Homebrew installed (`managed_by: homebrew`, as with `[bootstrap.brew] homebrew_metadata = true`) to Homebrew. Then, or without mise, it runs `brew upgrade --cask --greedy iterm2`, and `brew reinstall --cask iterm2` if the app on disk is still the old version (brew can record an upgrade it couldn't apply). The output goes to `~/.agent-tmux/iterm-upgrade/last.log`, and with mise, the run ends with what `mise bootstrap packages status` reports for iterm2.
 5. Starts iTerm2 and reopens each session in a new window (`tmux -CC attach`), with all its tabs and panes. The hotkey window's session isn't reopened: press your hotkey and `iterm-tmux` attaches it. A macOS notification says when iTerm is back.
 
 Once the clients are detached, iTerm always comes back, even if the upgrade fails or you press Ctrl+C.
 
 Run it from a tmux pane, which keeps running while iTerm is down; you'll find its output there after reattaching. Running it from outside iTerm, for example from Raycast, also works. A plain iTerm tab is refused, because it closes with iTerm. Agents running in plain iTerm tabs, outside tmux, end when iTerm quits: they're listed before you confirm, and `-y` refuses to go on while there are any.
 
-It needs iTerm2 installed with Homebrew (`--no-upgrade` works either way), `tmux`, `jq`, and the iTerm helper venv for opening windows (without it, it falls back to AppleScript).
+It needs iTerm2 installed with Homebrew, directly or through mise (`--no-upgrade` works either way), `tmux`, `jq`, and the iTerm helper venv for opening windows (without it, it falls back to AppleScript).
 
 ### From Raycast
 

@@ -43,24 +43,45 @@ iu_quit() {
   return 0
 }
 
-# _iu_brew <args...> -> runs brew, output indented on screen and in the log.
-# SUDO_ASKPASS=/usr/bin/false: a password prompt fails at once instead of
-# hanging in a pane nobody can see while iTerm is down.
-_iu_brew() {
-  iu_log "== brew $*"
-  SUDO_ASKPASS=/usr/bin/false HOMEBREW_NO_AUTO_UPDATE=1 brew "$@" </dev/null 2>&1 |
-    tee -a "$IU_LOG" | sed 's/^/    /'
+# _iu_run <args...> -> runs a package manager command, its output indented
+# on screen and copied to the log. SUDO_ASKPASS=/usr/bin/false: a password
+# prompt fails at once instead of hanging in a pane nobody can see while iTerm
+# is down.
+_iu_run() {
+  iu_log "== $*"
+  SUDO_ASKPASS=/usr/bin/false "$@" </dev/null 2>&1 | tee -a "$IU_LOG" | sed 's/^/    /'
 }
 
-# iu_upgrade <version> -> upgrades the app with Homebrew; 0 when it ends up at
-# <version>. brew can record a cask as upgraded while the app on disk stays
-# old (it was in use, or macOS blocked the move), so a mismatch gets a
+# _iu_mise <args...> -> mise run from $HOME, so the global config (where a
+# mise bootstrap setup declares its packages) applies wherever this runs.
+_iu_mise() { (cd "$HOME" && mise "$@"); }
+
+# iu_mise_entry -> the iterm2 entry of `mise bootstrap packages status --json`
+# (compact JSON) when mise declares it as a brew-cask package, else nothing.
+iu_mise_entry() {
+  [[ "${ITERM_UPGRADE_NO_MISE:-0}" == 1 ]] && return 0
+  command -v mise >/dev/null 2>&1 || return 0
+  _iu_mise bootstrap packages status --json 2>/dev/null </dev/null |
+    jq -c '."brew-cask".packages[]? | select(.package == "iterm2")' 2>/dev/null | head -n 1 || true
+}
+
+# iu_upgrade <version> -> upgrades the app; 0 when it ends up at <version>.
+# Declared in mise (IU_MISE=1), mise goes first: it upgrades a self-updating
+# cask only while the app isn't running, which is now. mise leaves a cask
+# that Homebrew installed (managed_by "homebrew") to Homebrew, so brew does
+# what mise didn't. brew can record a cask as upgraded while the app on disk
+# stays old (it was in use, or macOS blocked the move), so a mismatch gets a
 # reinstall.
 iu_upgrade() {
   local want="$1"
-  _iu_brew upgrade --cask --greedy iterm2 || true
+  if [[ "${IU_MISE:-0}" == 1 ]]; then
+    _iu_run _iu_mise bootstrap packages upgrade --yes brew-cask:iterm2 || true
+    [[ "$(iu_app_version)" == "$want" ]] && return 0
+    echo "  mise left iterm2 to Homebrew (its cask is Homebrew-managed); upgrading with brew"
+  fi
+  HOMEBREW_NO_AUTO_UPDATE=1 _iu_run brew upgrade --cask --greedy iterm2 || true
   [[ "$(iu_app_version)" == "$want" ]] && return 0
-  _iu_brew reinstall --cask iterm2 || true
+  HOMEBREW_NO_AUTO_UPDATE=1 _iu_run brew reinstall --cask iterm2 || true
   [[ "$(iu_app_version)" == "$want" ]]
 }
 
