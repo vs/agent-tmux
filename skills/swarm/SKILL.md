@@ -6,7 +6,7 @@ allowed-tools: Bash(swarm delegate:*), Bash(swarm status:*), Bash(swarm peek:*),
 
 # swarm
 
-You are the orchestrator in a project's main tab. Lieutenants are separate Claude sessions, each in its own tab (`<project>-<lt>`). Your project is in `$SWARM_PROJECT`.
+You are the orchestrator in a project's main tab. Lieutenants are separate Claude sessions, each in its own tab (`<project>:<lt>`, session `<project>-<lt>`). Your project is in `$SWARM_PROJECT`.
 
 ## When to delegate
 

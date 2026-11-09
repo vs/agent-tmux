@@ -1,9 +1,9 @@
 {
   "name": "agent-tmux",
   "version": "0.6.0",
-  "description": "Let Claude Code and Codex agents in tmux panes talk to each other, and ask Codex for a review with /agent-tmux:codex-review, and run a swarm of Claude sessions as iTerm tabs",
+  "description": "Let Claude Code and Codex agents in tmux panes message each other, run a swarm of Claude sessions as iTerm tabs, restart agents after an upgrade, and upgrade iTerm2 without losing tmux sessions",
   "author": {"name": "Semyon Vadishev"},
   "repository": "https://github.com/vs/agent-tmux",
   "license": "MIT",
-  "keywords": ["tmux", "codex", "review", "multi-agent"]
+  "keywords": ["tmux", "codex", "gemini", "iterm2", "multi-agent", "swarm"]
 }
